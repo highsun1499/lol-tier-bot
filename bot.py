@@ -43,8 +43,11 @@ async def check_lol_news():
                     articles = soup.select('a[data-testid^="article-card-"]')[:10]
                     articles.reverse() # 과거순 정렬
                     
-                    channel = bot.get_channel(NEWS_CHANNEL_ID)
-                    if not channel: return
+                    try:
+                        channel = await bot.fetch_channel(NEWS_CHANNEL_ID)
+                    except Exception as e:
+                        print(f"--- [로그] 채널을 페치하는 중 오류 발생: {e} ---")
+                        return
 
                     # 2. [중복 감지 핵심] 채널의 최근 메시지 100개를 가져와서 제목들만 추출
                     already_posted_titles = []
@@ -81,10 +84,12 @@ async def check_lol_news():
 
 @bot.event
 async def on_ready():
-    print(f'--- 봇 로그인 성공: {bot.user.name} ---')
+    print("--- [로그] 디스코드와 연결되었습니다! ---")
+    print(f"--- [로그] 봇 이름: {bot.user.name} ---")
     # 뉴스 체크 루프 시작
     if not check_lol_news.is_running():
         check_lol_news.start()
+        print("--- [로그] 뉴스 체크 루프가 시작되었습니다! ---")
 
 # --- [ 기존 기능: 서버 입장 시 역할 생성 ] ---
 @bot.event
