@@ -21,6 +21,6 @@ jobs:
 
       - name: Run Bot
         env:
-          TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          RIOT_KEY: ${{ secrets.RIOT_KEY }}
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
         run: python bot.py
