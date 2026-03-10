@@ -51,7 +51,7 @@ async def fetch_and_post_news():
                 if response.status == 200:
                     xml_data = await response.text()
                     # XML 파싱을 위해 'xml' 또는 'html.parser' 사용
-                    soup = BeautifulSoup(xml_data, 'xml') 
+                    soup = BeautifulSoup(xml_data, 'html.parser') 
                     
                     # RSS의 표준 아이템 태그인 <item>을 찾습니다.
                     items = soup.find_all('item')[:10]
