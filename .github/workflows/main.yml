@@ -19,6 +19,9 @@ jobs:
       - name: Install dependencies
         run: pip install discord.py aiohttp
 
+      - name: Install dependencies
+        run: pip install discord.py aiohttp beautifulsoup4
+
       - name: Run Bot
         env:
           # 봇 코드(bot.py)에서 os.getenv("DISCORD_TOKEN")로 부르고 있으므로 왼쪽 이름이 같아야 함
