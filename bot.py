@@ -7,6 +7,10 @@ import traceback
 import os
 import asyncio
 
+# [긴급 수정] 로그가 깃허브 액션 화면에 즉시 나타나게 합니다.
+def log(message):
+    print(f"--- [확인용 로그] {message} ---", flush=True)
+
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
@@ -29,71 +33,62 @@ intents.message_content = True
 intents.members = True 
 
 bot = commands.Bot(command_prefix='!', intents=intents)
-pending_users = {}
 
-# --- [ 신규 기능: 롤 새소식 크롤링 루프 ] ---
-@tasks.loop(minutes=60)
-async def check_lol_news():
-    print("--- [로그] 뉴스 체크 루프 시작 ---")
+# --- [ 뉴스 크롤링 핵심 함수 ] ---
+async def fetch_and_post_news():
+    log("뉴스 크롤링 시도 중...")
     url = "https://www.leagueoflegends.com/ko-kr/news/latest/"
     
     async with aiohttp.ClientSession() as session:
         try:
-            # fetch_channel을 사용하여 채널 정보를 강제로 새로고침합니다.
             channel = await bot.fetch_channel(NEWS_CHANNEL_ID)
-            
             async with session.get(url) as response:
                 if response.status == 200:
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
-                    
-                    # 뉴스 카드 추출
-                    articles = soup.select('a[data-testid^="article-card-"]')[:10]
+                    articles = soup.select('a[data-testid^="article-card-"]')[:5]
                     articles.reverse() 
-                    
-                    # 채널 히스토리에서 이미 올린 뉴스 제목들 수집
-                    already_posted_titles = []
-                    async for message in channel.history(limit=100):
-                        if message.author == bot.user and message.embeds:
-                            # 임베드 설명창의 **제목** 부분 추출
-                            clean_title = message.embeds[0].description.replace("**", "").strip()
-                            already_posted_titles.append(clean_title)
+
+                    # 이미 올린 뉴스인지 채널 메시지 확인
+                    already_posted = []
+                    async for msg in channel.history(limit=20):
+                        if msg.author == bot.user and msg.embeds:
+                            already_posted.append(msg.embeds[0].description.replace("**", "").strip())
 
                     new_count = 0
-                    for article in articles:
-                        title_element = article.find('h2')
-                        if not title_element: continue
+                    for art in articles:
+                        title = art.find('h2').text.strip()
+                        link = "https://www.leagueoflegends.com" + art['href']
                         
-                        title = title_element.text.strip()
-                        link = "https://www.leagueoflegends.com" + article['href']
-                        
-                        # 중복 검사
-                        if title in already_posted_titles:
+                        if title in already_posted:
                             continue
                         
-                        embed = discord.Embed(
-                            title="🆕 롤 공식 홈페이지 소식",
-                            description=f"**{title}**",
-                            url=link,
-                            color=0x0066ff
-                        )
-                        embed.set_footer(text="League of Legends News Feed")
+                        embed = discord.Embed(title="🆕 롤 최신 소식", description=f"**{title}**", url=link, color=0x0066ff)
                         await channel.send(embed=embed)
                         new_count += 1
-                        print(f"--- [로그] 뉴스 전송 완료: {title} ---")
+                        log(f"뉴스 전송 완료: {title}")
                     
                     if new_count == 0:
-                        print("--- [로그] 새로운 뉴스가 없습니다. ---")
+                        log("새로운 뉴스가 없습니다.")
+                else:
+                    log(f"홈페이지 접속 실패 (상태 코드: {response.status})")
         except Exception as e:
-            print(f"--- [로그] 뉴스 루프 에러 발생: {e} ---")
+            log(f"뉴스 처리 중 에러: {e}")
+
+@tasks.loop(minutes=60)
+async def news_loop():
+    await fetch_and_post_news()
 
 @bot.event
 async def on_ready():
-    print(f"--- [로그] 로그인 성공: {bot.user.name} ---")
-    # 뉴스 체크 루프 시작 (중복 실행 방지)
-    if not check_lol_news.is_running():
-        check_lol_news.start()
-        print("--- [로그] 뉴스 체크 루프가 가동되었습니다! ---")
+    log(f"봇 로그인 성공: {bot.user.name}")
+    
+    # [핵심] 봇이 켜지자마자 루프 기다리지 않고 '즉시' 한 번 실행!
+    await fetch_and_post_news()
+    
+    if not news_loop.is_running():
+        news_loop.start()
+        log("정기 뉴스 체크 루프 가동 시작 (60분 간격)")
 
 # --- [ 기존 기능: 서버 입장 시 역할 자동 생성 ] ---
 @bot.event
