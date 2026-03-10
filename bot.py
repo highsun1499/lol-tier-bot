@@ -1,16 +1,19 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks  # 쉼표 추가 및 tasks 임포트
 import aiohttp
+from bs4 import BeautifulSoup
 import random
 import traceback
 import os
 
 # ================= [ 설정 구역 ] =================
-# 깃허브 Secrets 및 main.yml에 적은 이름과 똑같이 맞췄습니다.
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
-# 티어 목록 (기존 역할 제거 및 대조용)
+# 📢 [필독] 새소식을 보낼 채널 ID를 여기에 넣으세요 (숫자만)
+NEWS_CHANNEL_ID = 1480944831600656384
+
+# 티어 목록 및 색상
 TIER_DATA = {
     "Challenger": 0xf4c874, "Grandmaster": 0xc64444, "Master": 0x9d5ca3,
     "Diamond": 0x576bce, "Emerald": 0x2da161, "Platinum": 0x4e9996,
@@ -18,17 +21,61 @@ TIER_DATA = {
     "Iron": 0x51484a, "Unranked": 0x000000
 }
 TIER_LIST = list(TIER_DATA.keys())
+
+# 중복 알림 방지용 변수
+last_news_title = ""
 # ===============================================
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
-pending_users = {} # 임시 인증 대기 명단
+pending_users = {}
+
+# --- [ 신규 기능: 롤 새소식 크롤링 루프 ] ---
+@tasks.loop(minutes=30)
+async def check_lol_news():
+    global last_news_title
+    url = "https://www.leagueoflegends.com/ko-kr/news/latest/"
+    
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    html = await response.text()
+                    soup = BeautifulSoup(html, 'html.parser')
+                    
+                    # 최신 뉴스 카드 선택 (사이트 구조 기준)
+                    first_article = soup.select_one('a[data-testid="article-card-0"]')
+                    if first_article:
+                        title = first_article.find('h2').text.strip()
+                        link = "https://www.leagueoflegends.com" + first_article['href']
+                        
+                        # 새로운 소식이 올라왔을 때만 전송
+                        if title != last_news_title:
+                            # 처음 봇을 켰을 때 과거 소식이 한꺼번에 오는 것 방지
+                            if last_news_title != "":
+                                channel = bot.get_channel(NEWS_CHANNEL_ID)
+                                if channel:
+                                    embed = discord.Embed(
+                                        title="🆕 롤 공식 홈페이지 새소식",
+                                        description=f"**{title}**",
+                                        url=link,
+                                        color=0x0066ff
+                                    )
+                                    embed.set_footer(text="League of Legends News Feed")
+                                    await channel.send(embed=embed)
+                            
+                            last_news_title = title
+        except Exception as e:
+            print(f"뉴스 체크 중 오류 발생: {e}")
 
 @bot.event
 async def on_ready():
     print(f'--- 봇 로그인 성공: {bot.user.name} ---')
+    # 뉴스 체크 루프 시작
+    if not check_lol_news.is_running():
+        check_lol_news.start()
 
-# 1. 봇이 서버에 초대되었을 때 역할 자동 생성
+# --- [ 기존 기능: 서버 입장 시 역할 생성 ] ---
 @bot.event
 async def on_guild_join(guild):
     print(f"새로운 서버 입장: {guild.name}")
@@ -40,7 +87,7 @@ async def on_guild_join(guild):
                 print(f"{guild.name} 서버에서 역할 생성 권한이 없습니다.")
                 break
 
-# 2. 인증 시작 명령어
+# --- [ 기존 기능: 인증 명령어 ] ---
 @bot.command()
 async def 인증(ctx, *, summoner_name):
     if "#" not in summoner_name:
@@ -60,7 +107,7 @@ async def 인증(ctx, *, summoner_name):
     embed.set_footer(text="인증이 완료되면 다시 원래 아이콘으로 바꾸셔도 됩니다.")
     await ctx.send(embed=embed)
 
-# 3. 아이콘 변경 확인 및 연동 성공 알림
+# --- [ 기존 기능: 확인 명령어 ] ---
 @bot.command()
 async def 확인(ctx):
     if ctx.author.id not in pending_users:
@@ -95,7 +142,7 @@ async def 확인(ctx):
             traceback.print_exc()
             await ctx.send("오류가 발생했습니다. 라이엇 API 키를 확인하세요.")
 
-# 4. 티어 실시간 갱신 (무저장 방식)
+# --- [ 기존 기능: 갱신 명령어 ] ---
 @bot.command()
 async def 갱신(ctx, *, summoner_name):
     if "#" not in summoner_name:
@@ -142,5 +189,4 @@ async def 갱신(ctx, *, summoner_name):
             traceback.print_exc()
             await ctx.send("갱신 중 오류가 발생했습니다. 라이엇 API 키를 확인하세요.")
 
-# 마지막 실행 부분의 이름을 DISCORD_TOKEN으로 맞췄습니다.
 bot.run(DISCORD_TOKEN)
