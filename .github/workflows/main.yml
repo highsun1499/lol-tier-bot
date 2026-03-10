@@ -2,12 +2,22 @@ name: Run LoL Bot
 
 on:
   schedule:
-    - cron: '0 */5 * * *'  # 5시간마다 자동 실행
+    # 1회차: 한국 00:00 시작 (UTC 15:00)
+    - cron: '0 15 * * *'
+    # 2회차: 한국 08:00 시작 (UTC 23:00)
+    - cron: '0 23 * * *'
+    # 3회차: 한국 12:00 시작 (UTC 03:00)
+    - cron: '0 3 * * *'
+    # 4회차: 한국 20:00 시작 (UTC 11:00)
+    - cron: '0 11 * * *'
+
   workflow_dispatch:      # 수동 실행 버튼 활성화
 
 jobs:
-  build:
+  run-bot:
     runs-on: ubuntu-latest
+    timeout-minutes: 240
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v3
@@ -16,15 +26,15 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+          cache: 'pip'
 
       - name: Install dependencies
-        # 라이브러리 설치는 이 한 줄이면 충분합니다.
-        run: pip install discord.py aiohttp beautifulsoup4
+        run: |
+          python -m pip install --upgrade pip
+          pip install discord.py aiohttp beautifulsoup4 lxml
 
       - name: Run Bot
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
-          # 만약 채널 ID도 시크릿에 넣었다면 아래줄 추가 (코드에서 os.getenv로 부를 경우)
-          # NEWS_CHANNEL_ID: ${{ secrets.NEWS_CHANNEL_ID }} 
         run: python bot.py
