@@ -6,6 +6,7 @@ import random
 import traceback
 import os
 import asyncio
+import re
 
 # [긴급 수정] 로그가 깃허브 액션 화면에 즉시 나타나게 합니다.
 def log(message):
@@ -37,9 +38,7 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # --- [ 뉴스 크롤링 핵심 함수 ] ---
 async def fetch_and_post_news():
     log("RSS 피드 읽는 중...")
-    # [수정] rss.app에서 받은 XML 링크를 여기에 넣으세요!
     rss_url = "https://rss.app/feeds/ibBUjKJnYGzR4y8Q.xml" 
-    
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
@@ -50,39 +49,51 @@ async def fetch_and_post_news():
             async with session.get(rss_url) as response:
                 if response.status == 200:
                     xml_data = await response.text()
-                    # XML 파싱을 위해 'xml' 또는 'html.parser' 사용
+                    # html.parser를 쓰되, 태그 추출 방식을 개선합니다.
                     soup = BeautifulSoup(xml_data, 'html.parser') 
                     
-                    # RSS의 표준 아이템 태그인 <item>을 찾습니다.
                     items = soup.find_all('item')[:10]
-                    items.reverse() # 과거순 정렬
+                    items.reverse()
 
-                    # 중복 체크용 히스토리
                     already_posted = []
                     async for msg in channel.history(limit=100):
                         if msg.author == bot.user and msg.embeds:
-                            already_posted.append(msg.embeds[0].description.replace("**", "").strip())
+                            already_posted.append(msg.embeds[0].title)
 
                     new_count = 0
                     for item in items:
-                        title = item.title.text.strip()
-                        link = item.link.text.strip()
+                        # [개선] CDATA 및 불필요한 태그 제거하여 제목만 추출
+                        raw_title = item.find('title').text
+                        clean_title = re.sub(r'<!\[CDATA\[|\]\]>', '', raw_title).strip()
                         
-                        # 중복 검사
-                        if title in already_posted:
+                        # [개선] 링크 추출 (RSS 앱 특성에 따라 태그 안의 텍스트를 정확히 가져옴)
+                        link = ""
+                        if item.find('link'):
+                            link = item.find('link').next_sibling.strip() if item.find('link').string is None else item.find('link').text.strip()
+                        
+                        # 링크가 비어있다면 다른 방식으로 시도 (guid 등)
+                        if not link and item.find('guid'):
+                            link = item.find('guid').text.strip()
+
+                        if clean_title in already_posted:
                             continue
                         
+                        # 임베드 구성
                         embed = discord.Embed(
-                            title="📢 롤 공식 뉴스 (RSS)",
-                            description=f"**{title}**",
+                            title=clean_title, # 제목을 클릭하면 링크로 이동하게 됨
                             url=link,
-                            color=0x00FF99 # RSS 버전은 색상을 살짝 다르게 해볼까요?
+                            description="공식 홈페이시 새 소식",
+                            color=0x00FF99
                         )
-                        embed.set_footer(text="League of Legends RSS Feed")
+                        embed.set_footer(text="League of Legends News")
                         
+                        # [선택] 만약 RSS에 이미지가 있다면 썸네일로 추가 가능
+                        # if item.find('media:content'):
+                        #    embed.set_image(url=item.find('media:content')['url'])
+
                         await channel.send(embed=embed)
                         new_count += 1
-                        log(f"RSS 뉴스 전송: {title}")
+                        log(f"RSS 뉴스 전송 성공: {clean_title}")
                     
                     if new_count == 0:
                         log(f"RSS 피드 {len(items)}개 분석 완료, 새 소식 없음.")
@@ -90,6 +101,7 @@ async def fetch_and_post_news():
                     log(f"RSS 접속 실패: {response.status}")
         except Exception as e:
             log(f"RSS 처리 중 에러 발생: {e}")
+            traceback.print_exc() # 상세 에러 로그 출력
 
 @tasks.loop(minutes=60)
 async def news_loop():
