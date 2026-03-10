@@ -3,11 +3,13 @@ from discord.ext import commands
 import aiohttp
 import random
 import traceback
+import os  # 보안을 위해 환경 변수를 불러오는 모듈입니다.
 
 # ================= [ 설정 구역 ] =================
-# 본인의 정보로 변경하세요.
-RIOT_API_KEY = "RGAPI-f2d86ffb-3f7b-4889-a3de-0efcb980373e"
-TOKEN = "MTQ3NzMxOTM1Mzk4Nzg5MTI5MQ.G4XOrk.ABQyHXYKKqVor70D6GgzoviqI_OS2HdCVMV1IU"
+# 깃허브 Secrets에 저장한 이름을 그대로 가져옵니다.
+# 코드를 공개(Public)로 전환해도 실제 키값은 노출되지 않습니다.
+RIOT_API_KEY = os.getenv("RIOT_API_KEY")
+TOKEN = os.getenv("DISCORD_TOKEN")
 
 # 티어 목록 (기존 역할 제거 및 대조용)
 TIER_DATA = {
@@ -21,7 +23,7 @@ TIER_LIST = list(TIER_DATA.keys())
 
 intents = discord.Intents.all()
 bot = commands.Bot(command_prefix='!', intents=intents)
-pending_users = {} # 임시 인증 대기 명단 (봇 재시작 시 초기화됨)
+pending_users = {} # 임시 인증 대기 명단
 
 @bot.event
 async def on_ready():
@@ -46,7 +48,6 @@ async def 인증(ctx, *, summoner_name):
         await ctx.send("❌ 소환사명 뒤에 태그(#)를 포함해 주세요. (예: 페이커#KR1)")
         return
     
-    # 0~28번 사이의 기본 아이콘 중 하나를 무작위로 배정
     target_icon = random.randint(0, 28)
     pending_users[ctx.author.id] = {"name": summoner_name, "icon": target_icon}
     
@@ -89,7 +90,7 @@ async def 확인(ctx):
 
             if current_icon == user_info["icon"]:
                 await ctx.send(f"✅ **{user_info['name']}**님, 인증에 성공했습니다!\n이제 `!갱신 {user_info['name']}`을 입력하여 티어 역할을 받으세요.")
-                del pending_users[ctx.author.id] # 대기 명단에서 삭제
+                del pending_users[ctx.author.id]
             else:
                 await ctx.send(f"❌ 아이콘이 다릅니다. (현재: {current_icon}번 / 목표: {user_info['icon']}번)\n아이콘 변경 후 다시 `!확인`을 눌러주세요.")
         
@@ -108,7 +109,6 @@ async def 갱신(ctx, *, summoner_name):
 
     async with aiohttp.ClientSession() as session:
         try:
-            # 1. PUUID 조회
             acc_url = f"https://asia.api.riotgames.com/riot/account/v1/accounts/by-riot-id/{name}/{tag}?api_key={RIOT_API_KEY}"
             async with session.get(acc_url) as r1:
                 acc_data = await r1.json()
@@ -117,7 +117,6 @@ async def 갱신(ctx, *, summoner_name):
                     await ctx.send("❌ 해당 소환사 정보를 찾을 수 없습니다.")
                     return
 
-            # 2. 티어 조회
             league_url = f"https://kr.api.riotgames.com/lol/league/v4/entries/by-puuid/{puuid}?api_key={RIOT_API_KEY}"
             async with session.get(league_url) as r2:
                 league_data = await r2.json()
@@ -131,20 +130,4 @@ async def 갱신(ctx, *, summoner_name):
                 role_name = user_tier.capitalize()
                 new_role = discord.utils.get(ctx.guild.roles, name=role_name)
 
-                if not new_role:
-                    await ctx.send(f"❌ 서버에 '{role_name}' 역할이 없습니다. 관리자에게 문의하세요.")
-                    return
-
-                # 3. 기존 티어 역할 모두 제거 후 새 역할 부여
-                roles_to_remove = [r for r in ctx.author.roles if r.name in TIER_LIST]
-                if roles_to_remove:
-                    await ctx.author.remove_roles(*roles_to_remove)
-                
-                await ctx.author.add_roles(new_role)
-                await ctx.send(f"🔄 **{summoner_name}**님의 티어를 확인하여 **{user_tier}** 역할을 부여했습니다!")
-
-        except Exception as e:
-            traceback.print_exc()
-            await ctx.send("갱신 중 오류가 발생했습니다. 라이엇 API 키를 확인하세요.")
-
-bot.run(TOKEN)
+                if not new_
