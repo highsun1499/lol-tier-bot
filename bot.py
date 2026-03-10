@@ -9,7 +9,7 @@ import os  # 보안을 위해 환경 변수를 불러오는 모듈입니다.
 # 깃허브 Secrets에 저장한 이름을 그대로 가져옵니다.
 # 코드를 공개(Public)로 전환해도 실제 키값은 노출되지 않습니다.
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
-TOKEN = os.getenv("DISCORD_TOKEN")
+DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 
 # 티어 목록 (기존 역할 제거 및 대조용)
 TIER_DATA = {
