@@ -1,8 +1,9 @@
 name: Run LoL Bot
+
 on:
   schedule:
-    - cron: '0 */5 * * *'
-  workflow_dispatch:
+    - cron: '0 */5 * * *'  # 5시간마다 자동 실행
+  workflow_dispatch:      # 수동 실행 버튼 활성화
 
 jobs:
   build:
@@ -17,15 +18,13 @@ jobs:
           python-version: '3.10'
 
       - name: Install dependencies
-        run: pip install discord.py aiohttp
-
-      - name: Install dependencies
+        # 라이브러리 설치는 이 한 줄이면 충분합니다.
         run: pip install discord.py aiohttp beautifulsoup4
 
       - name: Run Bot
         env:
-          # 봇 코드(bot.py)에서 os.getenv("DISCORD_TOKEN")로 부르고 있으므로 왼쪽 이름이 같아야 함
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
-          # 봇 코드(bot.py)에서 os.getenv("RIOT_API_KEY")로 부르고 있으므로 왼쪽 이름이 같아야 함
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
+          # 만약 채널 ID도 시크릿에 넣었다면 아래줄 추가 (코드에서 os.getenv로 부를 경우)
+          # NEWS_CHANNEL_ID: ${{ secrets.NEWS_CHANNEL_ID }} 
         run: python bot.py
