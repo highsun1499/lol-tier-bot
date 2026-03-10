@@ -37,12 +37,16 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # --- [ 뉴스 크롤링 핵심 함수 ] ---
 async def fetch_and_post_news():
     log("뉴스 크롤링 시도 중...")
-    url = "https://www.leagueoflegends.com/ko-kr/news/latest/"
+    url = "https://www.leagueoflegends.com/ko-kr/news/" # 주소 변경
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
     
-    async with aiohttp.ClientSession() as session:
+    async with aiohttp.ClientSession(headers=headers) as session: # 헤더 추가
         try:
             channel = await bot.fetch_channel(NEWS_CHANNEL_ID)
             async with session.get(url) as response:
+                log(f"접속 시도 결과: {response.status}") # 상태 코드 확인용
                 if response.status == 200:
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
