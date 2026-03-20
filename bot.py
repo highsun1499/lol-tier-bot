@@ -102,7 +102,7 @@ async def fetch_and_post_news():
                         )
                         if image_url:
                             embed.set_image(url=image_url)
-                        embed.set_footer(text="출처 : LoL 공식 홈페이지")
+                        embed.set_footer(text="출처 : 새 소식")
 
                         await channel.send(embed=embed)
                         new_count += 1
