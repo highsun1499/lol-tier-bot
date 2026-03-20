@@ -39,11 +39,10 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # --- [ 뉴스 크롤링 핵심 함수 ] ---
 async def fetch_and_post_news():
     log("롤 공식 홈페이지 뉴스 체크 시작...")
-    # 목록 페이지보다는 전체 데이터를 담고 있을 가능성이 높은 메인 뉴스 주소
-    news_url = "https://www.leagueoflegends.com/ko-kr/news/" 
+    # 주소를 살짝 변경하여 목록 전체가 나올 수 있는 경로로 접근
+    news_url = "https://www.leagueoflegends.com/ko-kr/news/latest/" 
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
     async with aiohttp.ClientSession(headers=headers) as session:
@@ -55,42 +54,59 @@ async def fetch_and_post_news():
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # [수정된 탐색 로직] 
-                    # 1. 모든 'a' 태그 중 href에 '/news/'가 포함된 것들을 수집
-                    all_links = soup.find_all('h2') # 보통 뉴스 제목은 h2에 있음
                     articles_data = []
 
-                    for h2 in all_links:
-                        # h2의 부모 중 가장 가까운 a 태그 찾기
-                        parent_a = h2.find_parent('a', href=True)
-                        if parent_a and '/news/' in parent_a['href']:
-                            link = parent_a['href']
-                            full_link = link if link.startswith('http') else "https://www.leagueoflegends.com" + link
-                            title = h2.text.strip()
+                    # 1. 모든 리스트 아이템 탐색 (최근 롤 홈페이지는 li 안에 뉴스가 있음)
+                    # 클래스 이름에 'style__Item'이나 'style__List'가 들어가는 경우가 많음
+                    items = soup.find_all(['li', 'div', 'a'], class_=re.compile(r"Item|Card|Article"))
+
+                    for item in items:
+                        # 해당 아이템 내에서 링크(a)와 제목(h2/h3) 찾기
+                        link_tag = item if item.name == 'a' and item.get('href') else item.find('a', href=True)
+                        title_tag = item.find(['h2', 'h3', 'p'], class_=re.compile(r"Title|title"))
+
+                        if link_tag and title_tag:
+                            href = link_tag['href']
+                            # 뉴스 링크가 맞는지 필터링
+                            if '/news/' not in href: continue
                             
-                            # 이미지 찾기 (부모 a 태그 안에서 img 태그 탐색)
-                            img_tag = parent_a.find('img')
-                            img_url = img_tag.get('src') if img_tag else ""
+                            full_link = href if href.startswith('http') else "https://www.leagueoflegends.com" + href
+                            title = title_tag.get_text().strip()
                             
-                            # 중복 방지 (리스트에 제목이 같으면 패스)
+                            # 중복 데이터 수집 방지
                             if not any(d['link'] == full_link for d in articles_data):
+                                # 이미지 찾기
+                                img_tag = item.find('img')
+                                img_url = img_tag.get('src') if img_tag else ""
+                                
                                 articles_data.append({
                                     'link': full_link,
                                     'title': title,
                                     'image': img_url
                                 })
 
-                    log(f"홈페이지에서 추출된 뉴스 후보: {len(articles_data)}개")
+                    log(f"홈페이지에서 추출된 총 아이템 수: {len(articles_data)}개")
                     
                     if not articles_data:
-                        log("뉴스 데이터를 추출하지 못했습니다. 구조가 완전히 바뀌었을 수 있습니다.")
+                        # 최후의 수단: 정규표현식으로 링크 강제 추출
+                        log("일반 추출 실패, 정규표현식으로 재시도 중...")
+                        raw_links = soup.find_all('a', href=re.compile(r"/ko-kr/news/"))
+                        for rl in raw_links:
+                            t = rl.find(['h2', 'h3'])
+                            if t:
+                                fl = "https://www.leagueoflegends.com" + rl['href']
+                                if not any(d['link'] == fl for d in articles_data):
+                                    articles_data.append({'link': fl, 'title': t.get_text().strip(), 'image': ''})
+
+                    if not articles_data:
+                        log("뉴스 데이터를 찾을 수 없습니다. (라이엇의 차단 또는 구조 대변경)")
                         return
 
-                    # 최신 5개 추출 및 역순 정렬
+                    # 최신 5개 역순 처리
                     target_articles = articles_data[:5]
                     target_articles.reverse()
 
-                    # 채널 히스토리 확인
+                    # 이미 올린 뉴스 링크 확인
                     already_posted_links = []
                     async for msg in channel.history(limit=20):
                         if msg.author == bot.user and msg.embeds:
@@ -104,7 +120,7 @@ async def fetch_and_post_news():
                         embed = discord.Embed(
                             title=art['title'],
                             url=art['link'],
-                            description="리그 오브 레전드 최신 소식",
+                            description="리그 오브 레전드 최신 소식을 확인하세요!",
                             color=0x00FF99
                         )
                         if art['image']:
@@ -121,7 +137,6 @@ async def fetch_and_post_news():
                     log(f"홈페이지 접근 실패: {response.status}")
         except Exception as e:
             log(f"뉴스 크롤링 에러 발생: {e}")
-            traceback.print_exc()
             
 @tasks.loop(minutes=60)
 async def news_loop():
