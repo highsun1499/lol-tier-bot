@@ -39,15 +39,15 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 # --- [ 뉴스 크롤링 핵심 함수 ] ---
 async def fetch_and_post_news():
     log("롤 공식 홈페이지 뉴스 체크 시작...")
+    # 목록 페이지보다는 전체 데이터를 담고 있을 가능성이 높은 메인 뉴스 주소
     news_url = "https://www.leagueoflegends.com/ko-kr/news/" 
-    # 브라우저처럼 보이게 헤더 보강
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
     }
     
     async with aiohttp.ClientSession(headers=headers) as session:
         try:
-            # 채널 가져오기 (ID를 int로 강제 변환)
             channel = await bot.fetch_channel(int(NEWS_CHANNEL_ID))
             
             async with session.get(news_url) as response:
@@ -55,72 +55,74 @@ async def fetch_and_post_news():
                     html = await response.text()
                     soup = BeautifulSoup(html, 'html.parser')
                     
-                    # 1. 뉴스 카드 찾기 (다양한 선택자 시도)
-                    articles = soup.select('a[data-testid="article-card"]')
-                    if not articles:
-                        articles = soup.select('a[class*="ArticleCard"]')
-                    if not articles:
-                        # 최후의 수단: 링크에 /news/가 포함된 모든 a 태그 탐색
-                        articles = [a for a in soup.find_all('a', href=True) if '/news/' in a['href'] and a.find('h2')]
+                    # [수정된 탐색 로직] 
+                    # 1. 모든 'a' 태그 중 href에 '/news/'가 포함된 것들을 수집
+                    all_links = soup.find_all('h2') # 보통 뉴스 제목은 h2에 있음
+                    articles_data = []
 
-                    log(f"홈페이지에서 찾은 뉴스 개수: {len(articles)}개")
+                    for h2 in all_links:
+                        # h2의 부모 중 가장 가까운 a 태그 찾기
+                        parent_a = h2.find_parent('a', href=True)
+                        if parent_a and '/news/' in parent_a['href']:
+                            link = parent_a['href']
+                            full_link = link if link.startswith('http') else "https://www.leagueoflegends.com" + link
+                            title = h2.text.strip()
+                            
+                            # 이미지 찾기 (부모 a 태그 안에서 img 태그 탐색)
+                            img_tag = parent_a.find('img')
+                            img_url = img_tag.get('src') if img_tag else ""
+                            
+                            # 중복 방지 (리스트에 제목이 같으면 패스)
+                            if not any(d['link'] == full_link for d in articles_data):
+                                articles_data.append({
+                                    'link': full_link,
+                                    'title': title,
+                                    'image': img_url
+                                })
+
+                    log(f"홈페이지에서 추출된 뉴스 후보: {len(articles_data)}개")
                     
-                    if not articles:
-                        log("뉴스 아이템을 찾지 못했습니다. 구조 확인이 필요합니다.")
+                    if not articles_data:
+                        log("뉴스 데이터를 추출하지 못했습니다. 구조가 완전히 바뀌었을 수 있습니다.")
                         return
 
-                    # 최신순 5개만 처리 (과거 데이터부터 올리기 위해 리버스)
-                    target_articles = articles[:5]
+                    # 최신 5개 추출 및 역순 정렬
+                    target_articles = articles_data[:5]
                     target_articles.reverse()
 
-                    # 이미 올린 뉴스 링크 확인 (최근 20개)
+                    # 채널 히스토리 확인
                     already_posted_links = []
                     async for msg in channel.history(limit=20):
                         if msg.author == bot.user and msg.embeds:
                             already_posted_links.append(msg.embeds[0].url)
 
                     new_count = 0
-                    for article in target_articles:
-                        href = article.get('href')
-                        if not href: continue
-                        
-                        # 전체 링크 생성
-                        link = href if href.startswith('http') else "https://www.leagueoflegends.com" + href
-                        
-                        # 중복 체크
-                        if link in already_posted_links:
+                    for art in target_articles:
+                        if art['link'] in already_posted_links:
                             continue
 
-                        # 제목/이미지 추출
-                        title_el = article.find('h2') or article.select_one('h3')
-                        title = title_el.text.strip() if title_el else "제목 없음"
-                        
-                        img_tag = article.find('img')
-                        image_url = img_tag.get('src') if img_tag else ""
-
-                        # 임베드 메시지 생성
                         embed = discord.Embed(
-                            title=title,
-                            url=link,
+                            title=art['title'],
+                            url=art['link'],
                             description="리그 오브 레전드 최신 소식",
                             color=0x00FF99
                         )
-                        if image_url:
-                            embed.set_image(url=image_url)
+                        if art['image']:
+                            embed.set_image(url=art['image'])
                         embed.set_footer(text="출처 : LoL 공식 홈페이지")
 
                         await channel.send(embed=embed)
                         new_count += 1
-                        log(f"신규 뉴스 포스팅: {title}")
+                        log(f"신규 뉴스 포스팅: {art['title']}")
 
                     if new_count == 0:
-                        log("새로운 소식이 없습니다. (기존 뉴스와 중복)")
+                        log("새로운 소식이 없습니다.")
                 else:
                     log(f"홈페이지 접근 실패: {response.status}")
         except Exception as e:
             log(f"뉴스 크롤링 에러 발생: {e}")
             traceback.print_exc()
-
+            
 @tasks.loop(minutes=60)
 async def news_loop():
     await fetch_and_post_news()
