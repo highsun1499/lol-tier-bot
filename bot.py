@@ -54,11 +54,11 @@ async def fetch_and_post_news():
                     if not articles:
                         return
 
-                    target_articles = articles[:5]
+                    target_articles = articles[:10]
                     target_articles.reverse()
 
                     already_posted_links = []
-                    async for msg in channel.history(limit=20):
+                    async for msg in channel.history(limit=100):
                         if msg.author == bot.user and msg.embeds:
                             already_posted_links.append(msg.embeds[0].url)
 
@@ -97,7 +97,7 @@ async def fetch_and_post_news():
                         if image_url:
                             embed.set_image(url=image_url)
                         
-                        embed.set_footer(text="출처 : LoL 공식 홈페이지")
+                        embed.set_footer(text="출처 : 새 소식")
 
                         try:
                             await channel.send(embed=embed)
