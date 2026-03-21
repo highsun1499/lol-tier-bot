@@ -1,4 +1,4 @@
-name: Run LoL Bot
+name: Run LOL-SUPPORT-BOT
 
 on:
   schedule:
@@ -32,7 +32,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install discord.py aiohttp beautifulsoup4 lxml
 
-      - name: Run Bot
+      - name: Run LOL-SUPPORT-BOT
         env:
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           RIOT_API_KEY: ${{ secrets.RIOT_API_KEY }}
