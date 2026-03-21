@@ -6,7 +6,8 @@ import os
 import re
 import traceback
 import random
-import html  # 특수 문자 처리를 위해 추가
+import html
+from datetime import time, timezone, timedelta  # 시간 설정을 위해 추가
 
 # [로그 설정]
 def log(message):
@@ -16,6 +17,11 @@ def log(message):
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 NEWS_CHANNEL_ID = 1480944831600656384  
+VOTE_CHANNEL_ID = 1484797598241128598  # 투표가 올라갈 채널 ID (뉴스 채널과 동일하게 설정됨)
+
+# 한국 시간(KST) 오후 1시 설정을 위한 타임존 정의
+KST = timezone(timedelta(hours=9))
+scheduled_vote_time = time(hour=13, minute=0, second=0, tzinfo=KST)
 
 TIER_DATA = {
     "Challenger": 0xf4c874, "Grandmaster": 0xc64444, "Master": 0x9d5ca3,
@@ -33,6 +39,7 @@ intents.members = True
 
 bot = commands.Bot(command_prefix='!', intents=intents)
 
+# --- 뉴스 크롤링 함수 ---
 async def fetch_and_post_news():
     log("롤 공식 홈페이지 뉴스 체크 시작...")
     news_url = "https://www.leagueoflegends.com/ko-kr/news/" 
@@ -69,20 +76,16 @@ async def fetch_and_post_news():
                         if link in already_posted_links:
                             continue
 
-                        # 제목/설명 추출
                         title_el = article.find('div', {'data-testid': 'card-title'})
                         title = title_el.get_text().strip() if title_el else "새로운 소식"
                         
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # 이미지 주소 정밀 추출 및 정화
                         img_tag = article.find('img', {'data-testid': 'mediaImage'})
                         image_url = ""
                         if img_tag and img_tag.get('src'):
-                            # &amp; 등을 &로 변환하고 불필요한 공백 제거
                             image_url = html.unescape(img_tag.get('src')).strip()
-                            # URL이 http로 시작하지 않으면 무시 (잘못된 형식 방지)
                             if not image_url.startswith('http'):
                                 image_url = ""
 
@@ -92,11 +95,8 @@ async def fetch_and_post_news():
                             description=description,
                             color=0x00FF99
                         )
-                        
-                        # 이미지가 유효할 때만 세팅
                         if image_url:
                             embed.set_image(url=image_url)
-                        
                         embed.set_footer(text="출처 : 새 소식")
 
                         try:
@@ -104,25 +104,58 @@ async def fetch_and_post_news():
                             log(f"신규 뉴스 포스팅 성공: {title}")
                         except Exception as send_error:
                             log(f"메시지 전송 실패 ({title}): {send_error}")
-
                 else:
                     log(f"홈페이지 접근 실패: {response.status}")
         except Exception as e:
             log(f"뉴스 크롤링 에러 발생: {e}")
             traceback.print_exc()
 
+# --- 뉴스 체크 루프 (60분마다) ---
 @tasks.loop(minutes=60)
 async def news_loop():
     await fetch_and_post_news()
 
+# --- 매일 오후 1시 자동 투표 루프 ---
+@tasks.loop(time=scheduled_vote_time)
+async def daily_vote_loop():
+    try:
+        channel = await bot.fetch_channel(int(VOTE_CHANNEL_ID))
+        
+        poll = discord.Poll(
+            question="🎮 오늘 게임하실 건가요? (포지션 선택)",
+            duration=timedelta(hours=11)  # 약 11시간 동안 투표 유지
+        )
+        
+        # 요청하신 선택지 반영
+        poll.add_answer(text="TOP", emoji="🛡️")
+        poll.add_answer(text="JGL", emoji="⚔️")
+        poll.add_answer(text="MID", emoji="🔥")
+        poll.add_answer(text="ADC", emoji="🏹")
+        poll.add_answer(text="SUP", emoji="✨")
+        poll.add_answer(text="미정", emoji="❓")
+        poll.add_answer(text="불참", emoji="❌")
+
+        await channel.send(poll=poll)
+        log("매일 오후 1시 자동 투표 게시 완료")
+        
+    except Exception as e:
+        log(f"투표 게시 에러: {e}")
+        traceback.print_exc()
+
 @bot.event
 async def on_ready():
     log(f"봇 로그인 성공: {bot.user.name}")
+    
+    # 봇 실행 시 즉시 뉴스 체크 한 번 수행
     await fetch_and_post_news()
+    
+    # 루프들이 실행 중이지 않으면 시작
     if not news_loop.is_running():
         news_loop.start()
+    if not daily_vote_loop.is_running():
+        daily_vote_loop.start()
 
-# --- 티어 인증 명령구역 (기존과 동일) ---
+# --- 티어 인증 명령구역 ---
 @bot.command()
 async def 인증(ctx, *, summoner_name):
     if "#" not in summoner_name:
