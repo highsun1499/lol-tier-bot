@@ -55,8 +55,8 @@ async def fetch_and_post_news():
                     raw_html = await response.text()
                     soup = BeautifulSoup(raw_html, 'html.parser')
                     
-                    # 뉴스 카드들 찾기
-                    articles = soup.select('a[data-testid="articlefeaturedcard-component"]')
+                    # 뉴스 카드들 찾기 (기본 및 추천 카드 모두 포함)
+                    articles = soup.select('a[data-testid^="article"]') 
                     log(f"홈페이지에서 찾은 뉴스 개수: {len(articles)}개")
                     
                     if not articles: return
@@ -65,7 +65,7 @@ async def fetch_and_post_news():
                     target_articles.reverse()
 
                     already_posted_links = []
-                    async for msg in channel.history(limit=50):
+                    async for msg in channel.history(limit=100):
                         if msg.author == bot.user and msg.embeds:
                             already_posted_links.append(msg.embeds[0].url)
 
@@ -75,32 +75,38 @@ async def fetch_and_post_news():
                         
                         if link in already_posted_links: continue
 
-                        title_el = article.find('div', {'data-testid': 'card-title'})
+                        title_el = article.find('div', {'data-testid': 'card-title'}) or article.select_one('h2')
                         title = title_el.get_text().strip() if title_el else "새로운 소식"
                         
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # [강화된 이미지 추출 로직]
+                        # [초강력 이미지 추출 로직]
                         image_url = ""
-                        # 1. mediaImage 또는 banner-image 우선 탐색
-                        img_tag = article.find('img', {'data-testid': 'mediaImage'}) or \
-                                  article.find('img', {'data-testid': 'banner-image'}) or \
-                                  article.find('img') # 최후의 수단으로 모든 img 태그 검색
+                        # img 태그 후보들: 특정 ID부터 일반 img까지
+                        img_tag = article.select_one('img[data-testid="banner-image"], img[data-testid="mediaImage"], img')
                         
                         if img_tag:
-                            # src, data-src 중 있는 것을 가져옴
-                            raw_src = img_tag.get('src') or img_tag.get('data-src') or ""
+                            # 1. 가능한 모든 속성 후보군 확인 (지연 로딩 대응)
+                            possible_attrs = ['src', 'data-src', 'srcset', 'data-srcset']
+                            raw_src = ""
+                            for attr in possible_attrs:
+                                val = img_tag.get(attr)
+                                if val:
+                                    # srcset인 경우 첫 번째 URL만 추출 (보통 가장 작은 사이즈나 기본 사이즈)
+                                    raw_src = val.split(',')[0].split(' ')[0]
+                                    break
+                            
                             if raw_src:
-                                # HTML 특수문자(&amp; 등) 제거
                                 image_url = html.unescape(raw_src).strip()
                                 
-                                # 상대 경로 처리
+                                # 상대 경로 및 프로토콜 처리
                                 if image_url.startswith('//'):
                                     image_url = "https:" + image_url
                                 elif image_url.startswith('/') and not image_url.startswith('//'):
                                     image_url = "https://www.leagueoflegends.com" + image_url
 
+                        # 디스코드 임베드 생성
                         embed = discord.Embed(
                             title=title,
                             url=link,
@@ -108,14 +114,13 @@ async def fetch_and_post_news():
                             color=0x00FF99
                         )
                         
-                        # 이미지 설정 (유효성 검사 포함)
                         if image_url and image_url.startswith('http'):
                             embed.set_image(url=image_url)
-                            log(f"이미지 추출 성공: {title}")
+                            log(f"이미지 추출 성공: {title} -> {image_url[:50]}...")
                         else:
                             log(f"이미지 추출 실패(주소 없음): {title}")
                         
-                        embed.set_footer(text="LoL News Update")
+                        embed.set_footer(text="새 소식")
 
                         try:
                             await channel.send(embed=embed)
