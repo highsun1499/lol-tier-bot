@@ -63,7 +63,7 @@ async def fetch_and_post_news():
                     target_articles = articles[:10]
                     target_articles.reverse()
 
-                    already_posted_links = []
+                    already_posted_links =[]
                     async for msg in channel.history(limit=100):
                         if msg.author == bot.user and msg.embeds:
                             already_posted_links.append(msg.embeds[0].url)
@@ -80,25 +80,49 @@ async def fetch_and_post_news():
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # --- [부모 탐색형 이미지 추출 로직으로 전면 수정] ---
+                        # ---[부모 탐색형 이미지 추출 로직으로 전면 수정] ---
                         image_url = ""
-                        # 1. 먼저 본인(article) 내부에서 이미지 탐색
-                        img_tag = article.select_one('img[data-testid="mediaImage"], img[data-testid="banner-image"], img')
+                        img_tag = None
                         
-                        # 2. 본인 내부에 없다면 부모(parent)로 올라가서 해당 카드 전체 영역에서 이미지 탐색
-                        if not img_tag and article.parent:
-                            img_tag = article.parent.select_one('img[data-testid="mediaImage"], img')
+                        # 1. 범용 img 태그를 빼고, 정확한 data-testid 위주로 먼저 탐색
+                        target_selectors = 'img[data-testid="mediaImage"], img[data-testid="banner-image"]'
+                        
+                        # 우선 본인(article) 내부 탐색
+                        img_tag = article.select_one(target_selectors)
+                        
+                        # 2. 본인 내부에 없다면 부모(parent)로 올라가며 탐색 (최대 3단계)
+                        if not img_tag:
+                            parent_node = article.parent
+                            for _ in range(3): # 구조가 깊을 수 있으므로 3단계까지 거슬러 올라감
+                                if not parent_node:
+                                    break
+                                img_tag = parent_node.select_one(target_selectors)
+                                if img_tag:
+                                    break
+                                parent_node = parent_node.parent
 
+                        # 3. 그래도 못 찾았다면, 해당 영역 내의 모든 img 중 '가짜 이미지'가 아닌 첫 번째 것 탐색
+                        if not img_tag:
+                            search_area = article.parent or article
+                            for img in search_area.find_all('img'):
+                                temp_src = img.get('src') or img.get('data-src') or ''
+                                # data:image 로 시작하는 베이스64 투명 가짜 이미지는 제외
+                                if temp_src and not temp_src.startswith('data:image'):
+                                    img_tag = img
+                                    break
+
+                        # 4. 최종 이미지 URL 추출 및 보정
                         if img_tag:
-                            # srcset 우선 확인, 없으면 src/data-src 확인
                             raw_src = ""
                             srcset = img_tag.get('srcset')
                             if srcset:
-                                raw_src = srcset.split(',')[0].split(' ')[0]
+                                # 보통 srcset은 "url 1x, url 2x" 형태이므로 쉼표로 나누고 첫 번째 요소 추출
+                                raw_src = srcset.split(',')[0].strip().split(' ')[0]
                             else:
                                 raw_src = img_tag.get('src') or img_tag.get('data-src') or ""
                             
                             if raw_src:
+                                import html # 혹시 맨 위에 import가 안 되어 있을까 봐 추가합니다.
                                 image_url = html.unescape(raw_src).strip()
                                 
                                 # 경로 보정
