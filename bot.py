@@ -80,15 +80,18 @@ async def fetch_and_post_news():
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # --- [이미지 추출 로직 수정 구간] ---
+                        # --- [부모 탐색형 이미지 추출 로직으로 전면 수정] ---
                         image_url = ""
-                        # 제공해주신 mediaImage 속성을 최우선으로 찾습니다.
-                        img_tag = article.find('img', {'data-testid': 'mediaImage'}) or \
-                                  article.find('img', {'data-testid': 'banner-image'}) or \
-                                  article.find('img')
+                        # 1. 먼저 본인(article) 내부에서 이미지 탐색
+                        img_tag = article.select_one('img[data-testid="mediaImage"], img[data-testid="banner-image"], img')
                         
+                        # 2. 본인 내부에 없다면 부모(parent)로 올라가서 해당 카드 전체 영역에서 이미지 탐색
+                        if not img_tag and article.parent:
+                            img_tag = article.parent.select_one('img[data-testid="mediaImage"], img')
+
                         if img_tag:
-                            # 1. srcset이 있으면 첫 번째 주소 사용, 없으면 src나 data-src 사용
+                            # srcset 우선 확인, 없으면 src/data-src 확인
+                            raw_src = ""
                             srcset = img_tag.get('srcset')
                             if srcset:
                                 raw_src = srcset.split(',')[0].split(' ')[0]
@@ -96,10 +99,9 @@ async def fetch_and_post_news():
                                 raw_src = img_tag.get('src') or img_tag.get('data-src') or ""
                             
                             if raw_src:
-                                # 2. HTML 특수문자(&amp;) 변환 및 공백 제거
                                 image_url = html.unescape(raw_src).strip()
                                 
-                                # 3. 경로 보정 (이미 http로 시작하면 그대로 둠)
+                                # 경로 보정
                                 if not image_url.startswith('http'):
                                     if image_url.startswith('//'):
                                         image_url = "https:" + image_url
