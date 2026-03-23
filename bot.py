@@ -55,7 +55,6 @@ async def fetch_and_post_news():
                     raw_html = await response.text()
                     soup = BeautifulSoup(raw_html, 'html.parser')
                     
-                    # 뉴스 카드들 찾기 (기본 및 추천 카드 모두 포함)
                     articles = soup.select('a[data-testid^="article"]') 
                     log(f"홈페이지에서 찾은 뉴스 개수: {len(articles)}개")
                     
@@ -81,32 +80,33 @@ async def fetch_and_post_news():
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # [초강력 이미지 추출 로직]
+                        # --- [이미지 추출 로직 수정 구간] ---
                         image_url = ""
-                        # img 태그 후보들: 특정 ID부터 일반 img까지
-                        img_tag = article.select_one('img[data-testid="banner-image"], img[data-testid="mediaImage"], img')
+                        # 제공해주신 mediaImage 속성을 최우선으로 찾습니다.
+                        img_tag = article.find('img', {'data-testid': 'mediaImage'}) or \
+                                  article.find('img', {'data-testid': 'banner-image'}) or \
+                                  article.find('img')
                         
                         if img_tag:
-                            # 1. 가능한 모든 속성 후보군 확인 (지연 로딩 대응)
-                            possible_attrs = ['src', 'data-src', 'srcset', 'data-srcset']
-                            raw_src = ""
-                            for attr in possible_attrs:
-                                val = img_tag.get(attr)
-                                if val:
-                                    # srcset인 경우 첫 번째 URL만 추출 (보통 가장 작은 사이즈나 기본 사이즈)
-                                    raw_src = val.split(',')[0].split(' ')[0]
-                                    break
+                            # 1. srcset이 있으면 첫 번째 주소 사용, 없으면 src나 data-src 사용
+                            srcset = img_tag.get('srcset')
+                            if srcset:
+                                raw_src = srcset.split(',')[0].split(' ')[0]
+                            else:
+                                raw_src = img_tag.get('src') or img_tag.get('data-src') or ""
                             
                             if raw_src:
+                                # 2. HTML 특수문자(&amp;) 변환 및 공백 제거
                                 image_url = html.unescape(raw_src).strip()
                                 
-                                # 상대 경로 및 프로토콜 처리
-                                if image_url.startswith('//'):
-                                    image_url = "https:" + image_url
-                                elif image_url.startswith('/') and not image_url.startswith('//'):
-                                    image_url = "https://www.leagueoflegends.com" + image_url
+                                # 3. 경로 보정 (이미 http로 시작하면 그대로 둠)
+                                if not image_url.startswith('http'):
+                                    if image_url.startswith('//'):
+                                        image_url = "https:" + image_url
+                                    elif image_url.startswith('/'):
+                                        image_url = "https://www.leagueoflegends.com" + image_url
+                        # --- [이미지 추출 로직 끝] ---
 
-                        # 디스코드 임베드 생성
                         embed = discord.Embed(
                             title=title,
                             url=link,
