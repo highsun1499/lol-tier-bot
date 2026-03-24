@@ -80,58 +80,82 @@ async def fetch_and_post_news():
                         desc_el = article.find('div', {'data-testid': 'card-description'})
                         description = desc_el.get_text().strip() if desc_el else "클릭하여 자세한 내용을 확인하세요."
                         
-                        # ---[부모 탐색형 이미지 추출 로직으로 전면 수정] ---
+                        # ---[부모 탐색형 이미지 추출 로직 강화판] ---
+                        import html
+                        import re
+                        import urllib.parse
+                        
                         image_url = ""
                         img_tag = None
                         
-                        # 1. 범용 img 태그를 빼고, 정확한 data-testid 위주로 먼저 탐색
-                        target_selectors = 'img[data-testid="mediaImage"], img[data-testid="banner-image"]'
-                        
-                        # 우선 본인(article) 내부 탐색
-                        img_tag = article.select_one(target_selectors)
-                        
-                        # 2. 본인 내부에 없다면 부모(parent)로 올라가며 탐색 (최대 3단계)
-                        if not img_tag:
-                            parent_node = article.parent
-                            for _ in range(3): # 구조가 깊을 수 있으므로 3단계까지 거슬러 올라감
-                                if not parent_node:
+                        # 1. 탐색할 영역 지정: 본인(article)부터 시작해서 최대 4단계 부모까지 올라감
+                        nodes_to_search =[article]
+                        curr = article.parent
+                        for _ in range(4):
+                            if curr:
+                                # ★핵심: 만약 부모 영역 안에 다른 뉴스 기사 링크가 또 있다면 탐색 중단! 
+                                # (엉뚱한 다른 기사의 이미지를 긁어오는 것을 방지)
+                                if len(curr.select('a[data-testid^="article"]')) > 1:
                                     break
-                                img_tag = parent_node.select_one(target_selectors)
-                                if img_tag:
-                                    break
-                                parent_node = parent_node.parent
-
-                        # 3. 그래도 못 찾았다면, 해당 영역 내의 모든 img 중 '가짜 이미지'가 아닌 첫 번째 것 탐색
-                        if not img_tag:
-                            search_area = article.parent or article
-                            for img in search_area.find_all('img'):
-                                temp_src = img.get('src') or img.get('data-src') or ''
-                                # data:image 로 시작하는 베이스64 투명 가짜 이미지는 제외
-                                if temp_src and not temp_src.startswith('data:image'):
+                                nodes_to_search.append(curr)
+                                curr = curr.parent
+                                
+                        # 2. 지정된 영역 안에서 유효한 이미지 찾기
+                        for node in nodes_to_search:
+                            # 먼저 정확한 이름표(data-testid)가 있는 것 중 투명 픽셀이 아닌 진짜 이미지 탐색
+                            for img in node.select('img[data-testid="mediaImage"], img[data-testid="banner-image"]'):
+                                tmp_src = img.get('src') or img.get('data-src') or img.get('srcset') or ''
+                                if tmp_src and 'data:image' not in tmp_src:
                                     img_tag = img
                                     break
+                            
+                            # 위에서 못 찾았다면 이름표가 없더라도 진짜 이미지가 있는지 싹 뒤짐
+                            if not img_tag:
+                                for img in node.find_all('img'):
+                                    tmp_src = img.get('src') or img.get('data-src') or img.get('srcset') or ''
+                                    if tmp_src and 'data:image' not in tmp_src:
+                                        img_tag = img
+                                        break
+                                        
+                            if img_tag:
+                                break # 유효한 이미지를 찾았으므로 상위 탐색 종료
 
-                        # 4. 최종 이미지 URL 추출 및 보정
+                        # 3. img 태그를 찾았다면 주소(URL) 추출
                         if img_tag:
                             raw_src = ""
                             srcset = img_tag.get('srcset')
                             if srcset:
-                                # 보통 srcset은 "url 1x, url 2x" 형태이므로 쉼표로 나누고 첫 번째 요소 추출
                                 raw_src = srcset.split(',')[0].strip().split(' ')[0]
                             else:
                                 raw_src = img_tag.get('src') or img_tag.get('data-src') or ""
                             
                             if raw_src:
-                                import html # 혹시 맨 위에 import가 안 되어 있을까 봐 추가합니다.
                                 image_url = html.unescape(raw_src).strip()
-                                
-                                # 경로 보정
-                                if not image_url.startswith('http'):
-                                    if image_url.startswith('//'):
-                                        image_url = "https:" + image_url
-                                    elif image_url.startswith('/'):
-                                        image_url = "https://www.leagueoflegends.com" + image_url
-                        # --- [이미지 추출 로직 끝] ---
+
+                        # 4. 여전히 못 찾았다면, style="background-image: url(...)" 형태로 숨겨져 있는지 탐색
+                        if not image_url:
+                            for node in nodes_to_search:
+                                bg_match = re.search(r'background(?:-image)?:\s*url\([\'"]?(https?://[^\'"\)]+)[\'"]?\)', str(node))
+                                if bg_match:
+                                    image_url = bg_match.group(1)
+                                    break
+
+                        # 5. 주소 보정 및 Next.js 보호막 우회
+                        if image_url:
+                            # 상대경로 보정
+                            if not image_url.startswith('http'):
+                                if image_url.startswith('//'):
+                                    image_url = "https:" + image_url
+                                elif image_url.startswith('/'):
+                                    image_url = "https://www.leagueoflegends.com" + image_url
+                                    
+                            # 디스코드에서 로드 안되는 롤 공홈 내부 Next.js 이미지 파라미터에서 원본 CDN 주소만 추출
+                            if '/_next/image' in image_url:
+                                parsed = urllib.parse.urlparse(image_url)
+                                qs = urllib.parse.parse_qs(parsed.query)
+                                if 'url' in qs:
+                                    image_url = qs['url'][0]
+                        # ---[이미지 추출 로직 끝] ---
 
                         embed = discord.Embed(
                             title=title,
