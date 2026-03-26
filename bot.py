@@ -134,7 +134,7 @@ async def fetch_and_post_news():
                                 embed.set_image(url=image_url)
                             
                             # ★ 수정된 푸터 (기존 text="새 소식"에서 date_text 변수로 교체)
-                            embed.set_footer(text=f"작성일: {date_text}")
+                            embed.set_footer(text=f"{date_text}")
 
                             try:
                                 await channel.send(embed=embed)
