@@ -179,8 +179,14 @@ async def daily_vote_loop():
     try:
         channel = await bot.fetch_channel(VOTE_CHANNEL_ID)
         
+        # ---[★ 추가: 오늘 날짜 계산 (한국 시간 기준)] ---
+        today = datetime.datetime.now(KST)
+        date_str = today.strftime("%Y년 %m월 %d일")
+        # -----------------------------------------------
+
         poll = discord.Poll(
-            question="🎮 오늘 게임하실 건가요?",
+            # ★ 수정: 질문에 계산된 날짜(date_str) 삽입
+            question=f"🎮 {date_str} 오늘 게임하실 건가요? (포지션 선택)",
             duration=timedelta(hours=11)
         )
         
@@ -193,7 +199,7 @@ async def daily_vote_loop():
         poll.add_answer(text="불참", emoji="❌")
 
         await channel.send(poll=poll)
-        log("매일 오후 1시 자동 투표 게시 완료")
+        log(f"매일 오후 1시 자동 투표 게시 완료 ({date_str})")
         
     except Exception as e:
         log(f"투표 게시 에러: {e}")
