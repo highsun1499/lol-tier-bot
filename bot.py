@@ -180,7 +180,7 @@ async def daily_vote_loop():
         channel = await bot.fetch_channel(VOTE_CHANNEL_ID)
         
         poll = discord.Poll(
-            question="🎮 오늘 게임하실 건가요? (포지션 선택)",
+            question="🎮 오늘 게임하실 건가요?",
             duration=timedelta(hours=11)
         )
         
