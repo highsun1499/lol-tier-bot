@@ -13,10 +13,13 @@ import traceback
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
+YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY") # 구글 클라우드에서 발급받은 키
+YT_CHANNEL_ID = "UC7S_G_miz2fS9a4m_1uUvSg"      # 롤 한국 공식 채널 ID
 
 # 채널 ID 설정 (int 형으로 고정)
 NEWS_CHANNEL_ID = 1480944831600656384  
 VOTE_CHANNEL_ID = 1484797598241128598  
+YT_NOTI_CHANNEL_ID = 1487481812874825879        # 유튜브 알림용 채널 ID
 
 # 타임존 및 스케줄 시간 설정 (한국 시간 오후 1시)
 KST = timezone(timedelta(hours=9))
@@ -169,10 +172,84 @@ async def fetch_and_post_news():
         log(f"크롤링 전체 에러 발생: {e}")
         traceback.print_exc()
 
+# --- 유튜브 최신 영상 체크 함수 ---
+async def fetch_and_post_youtube():
+    log("유튜브 새 영상 체크 시작...")
+    
+    # 1. 유튜브 API 호출 (최신순 10개)
+    yt_url = f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}&channelId={YT_CHANNEL_ID}&part=snippet,id&order=date&maxResults=10&type=video"
+
+    try:
+        # 이전에 최적화 제안드린 대로 bot.session(공용 세션)을 사용합니다.
+        async with bot.session.get(yt_url) as response:
+            if response.status == 200:
+                data = await response.json()
+                videos = data.get('items', [])
+                
+                if not videos:
+                    log("유튜브 영상을 찾을 수 없습니다.")
+                    return
+
+                channel = await bot.fetch_channel(int(YT_NOTI_CHANNEL_ID))
+                
+                # 2. 중복 방지: 해당 채널의 최근 메시지 히스토리 확인
+                already_posted_links = []
+                async for msg in channel.history(limit=100):
+                    if msg.author == bot.user and msg.embeds:
+                        already_posted_links.append(msg.embeds[0].url)
+
+                # 3. 최신 영상이 아래로 가게 역순 정렬
+                videos.reverse()
+
+                for video in videos:
+                    video_id = video['id']['videoId']
+                    video_url = f"https://www.youtube.com/watch?v={video_id}"
+                    
+                    # 이미 올린 영상이면 스킵
+                    if video_url in already_posted_links:
+                        continue
+
+                    # 4. 데이터 추출 및 정리
+                    title = html.unescape(video['snippet']['title'])
+                    # 설명이 너무 길면 임베드가 지저분해지므로 잘라줍니다.
+                    raw_desc = video['snippet']['description']
+                    description = (raw_desc[:100] + '...') if len(raw_desc) > 100 else raw_desc
+                    
+                    thumbnail_url = video['snippet']['thumbnails']['high']['url']
+                    
+                    # 날짜 변환 (ISO -> KST)
+                    published_at = video['snippet']['publishedAt']
+                    dt = datetime.datetime.fromisoformat(published_at.replace('Z', '+00:00'))
+                    dt_korea = dt.astimezone(timezone(timedelta(hours=9)))
+                    date_text = dt_korea.strftime("%Y년 %m월 %d일 %H:%M")
+
+                    # 5. 뉴스 임베드와 동일한 스타일 적용
+                    embed = discord.Embed(
+                        title=title,
+                        url=video_url,
+                        description=description,
+                        color=0xFF0000 # 유튜브 포인트 컬러 (빨강)
+                    )
+                    embed.set_image(url=thumbnail_url)
+                    embed.set_footer(text=f"YouTube 업로드 • {date_text}")
+
+                    await channel.send(embed=embed)
+                    log(f"유튜브 포스팅 완료: {title}")
+            else:
+                log(f"유튜브 API 접근 실패: {response.status}")
+                
+    except Exception as e:
+        log(f"유튜브 체크 에러: {e}")
+
+
 # ================= [ 자동 루프 구역 ] =================
 @tasks.loop(minutes=60)
 async def news_loop():
     await fetch_and_post_news()
+
+@tasks.loop(minutes=60)
+async def youtube_loop():
+    await fetch_and_post_youtube()
 
 @tasks.loop(time=SCHEDULED_VOTE_TIME)
 async def daily_vote_loop():
@@ -209,9 +286,15 @@ async def daily_vote_loop():
 async def on_ready():
     log(f"봇 로그인 성공: {bot.user.name}")
     
-    # 루프들이 실행 중이지 않으면 시작
+    # 실행 시 즉시 한 번씩 수행
+    await fetch_and_post_news()
+    await fetch_and_post_youtube()
+    
+    # 루프 시작 (중복 실행 방지 체크 포함)
     if not news_loop.is_running():
         news_loop.start()
+    if not youtube_loop.is_running():
+        youtube_loop.start()
     if not daily_vote_loop.is_running():
         daily_vote_loop.start()
 
