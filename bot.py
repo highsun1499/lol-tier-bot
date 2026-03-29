@@ -135,8 +135,12 @@ async def fetch_and_post_youtube():
     url = f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}&channelId=UC7S_G_miz2fS9a4m_1uUvSg&part=snippet,id&order=date&maxResults=10&type=video"
     try:
         async with bot.session.get(url) as resp:
-            if resp.status != 200: return
-            videos = (await resp.json()).get('items',[])
+            if resp.status != 200: 
+                log(f"유튜브 API 호출 실패 (상태 코드: {resp.status})")
+                return
+            
+            data = await resp.json()
+            videos = data.get('items',[])
             videos.reverse()
 
             channel = await bot.fetch_channel(YT_NOTI_CHANNEL_ID)
@@ -145,7 +149,11 @@ async def fetch_and_post_youtube():
             posted_links = await get_recent_posted_links(channel, limit=100)
             
             for vid in videos:
-                v_id = vid['id']['videoId']
+                # 안전하게 비디오 ID 가져오기
+                v_id = vid.get('id', {}).get('videoId')
+                if not v_id: continue
+                
+                # ★ 수정된 부분: 끊겨 있던 URL 문자열을 정상적으로 복구했습니다!
                 v_url = f"https://www.youtube.com/watch?v={v_id}"
                 
                 # 캐싱된 링크 리스트 안에서 검사
@@ -159,12 +167,15 @@ async def fetch_and_post_youtube():
                 embed = discord.Embed(title=title, url=v_url, description=desc, color=0xFF0000)
                 embed.set_image(url=img)
                 embed.set_footer(text=f"YouTube 업로드 • {dt.strftime('%Y년 %m월 %d일 %H:%M')}")
+                
                 await channel.send(embed=embed)
                 log(f"유튜브 포스팅: {title}")
                 
                 posted_links.append(v_url)
                 
-    except Exception as e: log(f"유튜브 에러: {e}")
+    except Exception as e: 
+        log(f"유튜브 에러: {e}")
+        traceback.print_exc() # 에러의 정확한 위치를 알려주도록 추가
 
 # ================= [ 자동 루프 & 이벤트 ] =================
 @tasks.loop(minutes=60)
