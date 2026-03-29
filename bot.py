@@ -98,8 +98,8 @@ async def fetch_and_post_news():
 
             channel = await bot.fetch_channel(NEWS_CHANNEL_ID)
             
-            # ★ 최적화: 매번 history를 조회하지 않고, 처음에 한 번만 30개 링크를 캐싱합니다.
-            posted_links = await get_recent_posted_links(channel, limit=30)
+            # ★ 최적화: 매번 history를 조회하지 않고, 처음에 한 번만 100개 링크를 캐싱합니다.
+            posted_links = await get_recent_posted_links(channel, limit=100)
             
             for art in articles:
                 link = art.get('action', {}).get('payload', {}).get('url', '')
