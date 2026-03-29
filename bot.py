@@ -11,21 +11,17 @@ import random
 import traceback
 
 # ================= [ 설정 구역 ] =================
-# 환경 변수에서 키를 가져옵니다.
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 YOUTUBE_API_KEY = os.getenv("YOUTUBE_API_KEY")
 
-# 채널 ID 설정
 NEWS_CHANNEL_ID = 1480944831600656384  
 VOTE_CHANNEL_ID = 1484797598241128598  
 YT_NOTI_CHANNEL_ID = 1487481812874825879
 
-# 타임존 및 스케줄 설정 (KST)
 KST = timezone(timedelta(hours=9))
 SCHEDULED_VOTE_TIME = time(hour=13, minute=0, second=0, tzinfo=KST)
 
-# 티어 데이터
 TIER_DATA = {
     "Challenger": 0xf4c874, "Grandmaster": 0xc64444, "Master": 0x9d5ca3,
     "Diamond": 0x576bce, "Emerald": 0x2da161, "Platinum": 0x4e9996,
@@ -36,7 +32,6 @@ TIER_LIST = list(TIER_DATA.keys())
 
 pending_users = {}
 
-# [로그 설정]
 def log(message):
     now = datetime.datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')
     print(f"[{now}] {message}", flush=True)
@@ -51,7 +46,6 @@ class LoLBot(commands.Bot):
         self.session = None
 
     async def setup_hook(self):
-        # 전역 세션 생성 (모든 API 호출에 재사용)
         self.session = aiohttp.ClientSession(headers={
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
         })
@@ -64,9 +58,8 @@ class LoLBot(commands.Bot):
 
 bot = LoLBot()
 
-# ================= [ 공통 유틸리티 함수 ] =================
+# =================[ 공통 유틸리티 함수 ] =================
 async def get_puuid(name_with_tag):
-    """라이엇 ID를 입력받아 PUUID를 반환 (실패 시 None)"""
     if "#" not in name_with_tag: return None
     try:
         name, tag = name_with_tag.split("#", 1)
@@ -78,12 +71,14 @@ async def get_puuid(name_with_tag):
         log(f"PUUID 조회 에러: {e}")
     return None
 
-async def is_already_posted(channel, target_url):
-    """채널 최근 히스토리에서 동일한 URL의 임베드가 있는지 확인"""
-    async for msg in channel.history(limit=10): # 최근 10개만 확인해도 충분
-        if msg.author == bot.user and msg.embeds and msg.embeds[0].url == target_url:
-            return True
-    return False
+# ★ Rate Limit 방지용 최적화 함수: 한 번에 모든 링크를 가져옵니다.
+async def get_recent_posted_links(channel, limit=30):
+    """채널 최근 히스토리에서 봇이 올린 임베드 URL 목록을 한 번에 가져옴"""
+    links =[]
+    async for msg in channel.history(limit=limit):
+        if msg.author == bot.user and msg.embeds and msg.embeds[0].url:
+            links.append(msg.embeds[0].url)
+    return links
 
 # ================= [ 핵심 기능: 뉴스 & 유튜브 ] =================
 async def fetch_and_post_news():
@@ -102,18 +97,22 @@ async def fetch_and_post_news():
             articles.reverse()
 
             channel = await bot.fetch_channel(NEWS_CHANNEL_ID)
+            
+            # ★ 최적화: 매번 history를 조회하지 않고, 처음에 한 번만 30개 링크를 캐싱합니다.
+            posted_links = await get_recent_posted_links(channel, limit=30)
+            
             for art in articles:
                 link = art.get('action', {}).get('payload', {}).get('url', '')
                 if not link: continue
                 if not link.startswith('http'): link = "https://www.leagueoflegends.com" + link
                 
-                if await is_already_posted(channel, link): continue
+                # 캐싱된 링크 리스트 안에서 검사
+                if link in posted_links: continue
 
                 title = art.get('title', '새로운 소식')
                 desc = re.sub(r'<[^>]+>', '', art.get('description', {}).get('body', '')).strip()
                 img = html.unescape(art.get('media', {}).get('url', '')).strip()
                 
-                # 날짜 처리
                 pub = art.get('publishedAt', '')
                 date_text = "새 소식"
                 if pub:
@@ -125,6 +124,10 @@ async def fetch_and_post_news():
                 embed.set_footer(text=date_text)
                 await channel.send(embed=embed)
                 log(f"뉴스 포스팅: {title}")
+                
+                # 방금 올린 글도 캐시에 추가하여 중복 전송 방지
+                posted_links.append(link) 
+                
     except Exception as e: log(f"뉴스 에러: {e}")
 
 async def fetch_and_post_youtube():
@@ -133,15 +136,20 @@ async def fetch_and_post_youtube():
     try:
         async with bot.session.get(url) as resp:
             if resp.status != 200: return
-            videos = (await resp.json()).get('items', [])
+            videos = (await resp.json()).get('items',[])
             videos.reverse()
 
             channel = await bot.fetch_channel(YT_NOTI_CHANNEL_ID)
+            
+            # ★ 최적화: 여기서도 처음에 한 번만 30개 링크 캐싱
+            posted_links = await get_recent_posted_links(channel, limit=30)
+            
             for vid in videos:
                 v_id = vid['id']['videoId']
                 v_url = f"https://www.youtube.com/watch?v={v_id}"
                 
-                if await is_already_posted(channel, v_url): continue
+                # 캐싱된 링크 리스트 안에서 검사
+                if v_url in posted_links: continue
 
                 title = html.unescape(vid['snippet']['title'])
                 desc = vid['snippet']['description'][:100] + "..."
@@ -153,6 +161,9 @@ async def fetch_and_post_youtube():
                 embed.set_footer(text=f"YouTube 업로드 • {dt.strftime('%Y년 %m월 %d일 %H:%M')}")
                 await channel.send(embed=embed)
                 log(f"유튜브 포스팅: {title}")
+                
+                posted_links.append(v_url)
+                
     except Exception as e: log(f"유튜브 에러: {e}")
 
 # ================= [ 자동 루프 & 이벤트 ] =================
@@ -167,7 +178,7 @@ async def daily_vote_loop():
         channel = await bot.fetch_channel(VOTE_CHANNEL_ID)
         date_str = datetime.datetime.now(KST).strftime("%Y년 %m월 %d일")
         poll = discord.Poll(question=f"🎮 {date_str} 오늘 게임하실 건가요? (포지션 선택)", duration=timedelta(hours=11))
-        for t, e in [("TOP", "🛡️"), ("JGL", "⚔️"), ("MID", "🔥"), ("SUP", "✨"), ("ADC", "🏹"), ("미정", "❓"), ("불참", "❌")]:
+        for t, e in[("TOP", "🛡️"), ("JGL", "⚔️"), ("MID", "🔥"), ("SUP", "✨"), ("ADC", "🏹"), ("미정", "❓"), ("불참", "❌")]:
             poll.add_answer(text=t, emoji=e)
         await channel.send(poll=poll)
         log(f"투표 게시 완료 ({date_str})")
