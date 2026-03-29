@@ -72,7 +72,7 @@ async def get_puuid(name_with_tag):
     return None
 
 # ★ Rate Limit 방지용 최적화 함수: 한 번에 모든 링크를 가져옵니다.
-async def get_recent_posted_links(channel, limit=30):
+async def get_recent_posted_links(channel, limit=100):
     """채널 최근 히스토리에서 봇이 올린 임베드 URL 목록을 한 번에 가져옴"""
     links =[]
     async for msg in channel.history(limit=limit):
@@ -141,8 +141,8 @@ async def fetch_and_post_youtube():
 
             channel = await bot.fetch_channel(YT_NOTI_CHANNEL_ID)
             
-            # ★ 최적화: 여기서도 처음에 한 번만 30개 링크 캐싱
-            posted_links = await get_recent_posted_links(channel, limit=30)
+            # ★ 최적화: 여기서도 처음에 한 번만 100개 링크 캐싱
+            posted_links = await get_recent_posted_links(channel, limit=100)
             
             for vid in videos:
                 v_id = vid['id']['videoId']
