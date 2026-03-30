@@ -182,7 +182,7 @@ async def fetch_and_post_youtube():
                 embed = discord.Embed(title=title, url=v_url, description=desc, color=0xFF0000)
                 if img:
                     embed.set_image(url=img)
-                embed.set_footer(text=f"YouTube 업로드 • {dt.strftime('%Y년 %m월 %d일 %H:%M')}")
+                embed.set_footer(text=f"{dt.strftime('%Y년 %m월 %d일 %H:%M')}")
                 
                 try:
                     await channel.send(embed=embed)
