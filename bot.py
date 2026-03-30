@@ -132,7 +132,7 @@ async def fetch_and_post_news():
 
 async def fetch_and_post_youtube():
     log("유튜브 영상 체크 중...")
-    url = f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}&channelId=UC7S_G_miz2fS9a4m_1uUvSg&part=snippet,id&order=date&maxResults=10&type=video"
+    url = f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}&channelId=UCooLkG0FfrkPBQsSuC95L6w&part=snippet,id&order=date&maxResults=10&type=video"
     try:
         async with bot.session.get(url) as resp:
             if resp.status != 200: 
