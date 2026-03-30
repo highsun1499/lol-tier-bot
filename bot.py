@@ -132,54 +132,68 @@ async def fetch_and_post_news():
 
 async def fetch_and_post_youtube():
     log("유튜브 영상 체크 중...")
-    url = f"https://www.googleapis.com/youtube/v3/search?key={YOUTUBE_API_KEY}&channelId=UCooLkG0FfrkPBQsSuC95L6w&part=snippet,id&order=date&maxResults=10&type=video"
+    
+    # 롤 코리아 채널 ID: UCooLkG0FfrkPBQsSuC95L6w
+    # 유튜브 채널의 고유 ID 앞 두 글자 'UC'를 'UU'로 바꾸면 그 채널의 '모든 업로드 동영상' 재생목록 ID가 됩니다.
+    UPLOADS_PLAYLIST_ID = "UUooLkG0FfrkPBQsSuC95L6w"
+    
+    if not YOUTUBE_API_KEY:
+        log("유튜브 API 키가 환경변수에 없습니다.")
+        return
+        
+    # Search API 대신 PlaylistItems API를 사용합니다. (100% 정확한 최신순 보장 + 할당량 절약)
+    url = f"https://www.googleapis.com/youtube/v3/playlistItems?key={YOUTUBE_API_KEY}&playlistId={UPLOADS_PLAYLIST_ID}&part=snippet&maxResults=10"
+    
     try:
         async with bot.session.get(url) as resp:
             if resp.status != 200: 
-                log(f"유튜브 API 호출 실패 (상태 코드: {resp.status})")
+                error_msg = await resp.text()
+                log(f"유튜브 API 호출 실패 (상태 코드: {resp.status}) / 사유: {error_msg}")
                 return
             
             data = await resp.json()
             videos = data.get('items',[])
-
-            # ★ 이 줄을 추가해서 유튜브 API가 영상 10개를 줬는지 확인합니다!
-            log(f"유튜브 API에서 가져온 영상 개수: {len(videos)}개") 
-        
+            log(f"유튜브 재생목록에서 가져온 영상 개수: {len(videos)}개")
+            
+            # API가 최신순(가장 최신이 0번 인덱스)으로 주므로, 
+            # 디스코드에 올릴 때 과거 -> 최신 순서로 예쁘게 올라가도록 역순 정렬합니다.
             videos.reverse()
 
             channel = await bot.fetch_channel(YT_NOTI_CHANNEL_ID)
-            
-            # ★ 최적화: 여기서도 처음에 한 번만 100개 링크 캐싱
             posted_links = await get_recent_posted_links(channel, limit=100)
             
             for vid in videos:
-                # 안전하게 비디오 ID 가져오기
-                v_id = vid.get('id', {}).get('videoId')
+                # PlaylistItems API에서는 videoId의 저장 위치가 조금 다릅니다.
+                v_id = vid.get('snippet', {}).get('resourceId', {}).get('videoId')
                 if not v_id: continue
                 
-                # ★ 수정된 부분: 끊겨 있던 URL 문자열을 정상적으로 복구했습니다!
                 v_url = f"https://www.youtube.com/watch?v={v_id}"
                 
-                # 캐싱된 링크 리스트 안에서 검사
                 if v_url in posted_links: continue
 
                 title = html.unescape(vid['snippet']['title'])
                 desc = vid['snippet']['description'][:100] + "..."
-                img = vid['snippet']['thumbnails']['high']['url']
+                # 최고화질 썸네일(maxres) 시도 후, 없으면 고화질(high) 사용
+                thumbnails = vid['snippet']['thumbnails']
+                img = thumbnails.get('maxres', thumbnails.get('high', {})).get('url', '')
+                
                 dt = datetime.datetime.fromisoformat(vid['snippet']['publishedAt'].replace('Z', '+00:00')).astimezone(KST)
 
                 embed = discord.Embed(title=title, url=v_url, description=desc, color=0xFF0000)
-                embed.set_image(url=img)
+                if img:
+                    embed.set_image(url=img)
                 embed.set_footer(text=f"YouTube 업로드 • {dt.strftime('%Y년 %m월 %d일 %H:%M')}")
                 
-                await channel.send(embed=embed)
-                log(f"유튜브 포스팅: {title}")
-                
-                posted_links.append(v_url)
+                try:
+                    await channel.send(embed=embed)
+                    log(f"유튜브 포스팅 완료: {title}")
+                    posted_links.append(v_url)
+                except Exception as send_e:
+                    log(f"유튜브 전송 실패: {title} - {send_e}")
                 
     except Exception as e: 
         log(f"유튜브 에러: {e}")
-        traceback.print_exc() # 에러의 정확한 위치를 알려주도록 추가
+        traceback.print_exc()
 
 # ================= [ 자동 루프 & 이벤트 ] =================
 @tasks.loop(minutes=60)
