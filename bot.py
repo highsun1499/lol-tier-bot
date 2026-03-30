@@ -141,6 +141,10 @@ async def fetch_and_post_youtube():
             
             data = await resp.json()
             videos = data.get('items',[])
+
+            # ★ 이 줄을 추가해서 유튜브 API가 영상 10개를 줬는지 확인합니다!
+            log(f"유튜브 API에서 가져온 영상 개수: {len(videos)}개") 
+        
             videos.reverse()
 
             channel = await bot.fetch_channel(YT_NOTI_CHANNEL_ID)
