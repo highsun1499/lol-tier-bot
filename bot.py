@@ -185,28 +185,35 @@ async def fetch_and_post_youtube():
 async def fetch_and_post_x():
     log("X(트위터) 게시물 체크 중...")
     
-    # RSSHub를 이용하여 @LeagueOfLegendsKR 트윗을 XML 형태로 변환하여 가져옵니다.
+    # ★ 수정됨: X(트위터) 우회를 위한 전 세계 Nitter/RSSHub 미러 서버 백업 리스트를 대폭 늘렸습니다.
+    # 위에서부터 차례대로 접속을 시도하고 하나라도 뚫리면 바로 가져옵니다.
     rss_urls =[
         "https://rsshub.app/twitter/user/LeagueOfLegendsKR", 
-        "https://nitter.net/LeagueOfLegendsKR/rss" # 혹시 RSSHub가 막히면 Nitter 등 대안이 될 수 있습니다.
+        "https://nitter.poast.org/LeagueOfLegendsKR/rss",
+        "https://nitter.cz/LeagueOfLegendsKR/rss",
+        "https://nitter.privacydev.net/LeagueOfLegendsKR/rss",
+        "https://nitter.projectsegfau.lt/LeagueOfLegendsKR/rss",
+        "https://mstdn.social/users/LeagueOfLegendsKR.rss" # 완전 막힐 경우를 대비한 대체 라우팅
     ]
     
     success = False
     xml_data = ""
     
-    # 여러 RSS 서버 중 연결되는 첫 번째 서버를 사용합니다.
+    # 여러 서버 중 연결되고 내용이 있는 첫 번째 서버를 사용합니다.
+    # timeout을 10초에서 5초로 줄여서, 죽은 서버를 빠르게 손절하고 다음 서버로 넘어가게 최적화했습니다.
     for url in rss_urls:
         try:
-            async with bot.session.get(url, timeout=10) as resp:
+            async with bot.session.get(url, timeout=5) as resp:
                 if resp.status == 200:
                     xml_data = await resp.text()
-                    success = True
-                    break
+                    if "<item>" in xml_data: # 정상적인 게시물 데이터가 들어있는지 확인
+                        success = True
+                        break
         except:
-            continue
+            continue # 연결 실패(Timeout) 시 다음 서버 주소로 넘어감
             
     if not success:
-        log("X(트위터) RSS 피드 서버에 연결할 수 없습니다. 나중에 다시 시도합니다.")
+        log("X(트위터) 무료 RSS 우회 서버들이 현재 모두 막혀있습니다. 1시간 뒤에 다시 시도합니다.")
         return
         
     try:
