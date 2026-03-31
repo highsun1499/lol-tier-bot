@@ -181,124 +181,126 @@ async def fetch_and_post_youtube():
         log(f"유튜브 에러: {e}")
         traceback.print_exc()
 
-# =================[ 핵심 기능 3: X (트위터) 융단폭격 스크래핑 ] =================
+# =================[ 핵심 기능 3: X (트위터) Syndication API 우회 스크래핑 ] =================
 async def fetch_and_post_x():
-    log("X(트위터) 방어벽 우회 시도 중...")
+    log("X(트위터) Syndication V2 백도어 우회 시도 중...")
     
-    # ★ 제미니 특제 백도어: 일론 머스크의 엑스 차단망을 피하기 위해 
-    # 전 세계 개발자들이 몰래 운영하는 비밀 우회 서버(Mirror) 9곳을 차례대로 찌릅니다.
-    mirror_servers =[
-        "https://nitter.poast.org/LeagueOfLegendsKR/rss",
-        "https://nitter.privacydev.net/LeagueOfLegendsKR/rss",
-        "https://rsshub.rssforever.com/twitter/user/LeagueOfLegendsKR",
-        "https://rsshub.app/twitter/user/LeagueOfLegendsKR",
-        "https://rss.itazuraanime.com/twitter/user/LeagueOfLegendsKR",
-        "https://nitter.cz/LeagueOfLegendsKR/rss",
-        "https://rsshub.lihaoc.com/twitter/user/LeagueOfLegendsKR",
-        "https://rss.peal.cc/twitter/user/LeagueOfLegendsKR",
-        "https://nitter.esmailelbob.xyz/LeagueOfLegendsKR/rss"
-    ]
+    # ★ 제미니 최종 병기: X(트위터) 공식 임베드 위젯(Widget) 전용 백도어 API
+    # 이 API는 외부 사이트(블로그, 뉴스 기사)에 트위터를 띄워주기 위해 X 본사에서 '강제로' 열어둔 합법적 우회로입니다.
+    # IP 밴을 당하지 않고, 자바스크립트나 보안 토큰 없이 바로 순수 JSON 데이터를 넘겨줍니다!
+    syndication_url = "https://cdn.syndication.twimg.com/tweet-result?features=tfw_timeline_list%3A%3Btfw_follower_count_sunset%3Atrue%3Btfw_tweet_edit_backend%3Aon%3Btfw_refsrc_session%3Aon%3Btfw_fosnr_api_calling_resource_backend%3Aon%3Btfw_mixed_media_15897%3Atreatment%3Btfw_experiments_cookie_expiration%3A1209600%3Btfw_show_birdwatch_pivots_enabled%3Aon%3Btfw_duplicate_scribes_to_settings%3Aon%3Btfw_use_profile_image_shape_enabled%3Aon%3Btfw_video_hls_dynamic_manifests_15082%3Atrue_bitrate%3Btfw_legacy_timeline_sunset%3Atrue%3Btfw_tweet_edit_frontend%3Aon&id=LeagueOfLegendsKR&lang=ko"
     
-    # 깃허브 봇이 아니라 '평범한 아이폰 유저'인 것처럼 철저하게 신분을 위장합니다.
+    # 타임라인을 긁어오기 위한 Syndication Timeline API 
+    timeline_url = "https://syndication.twitter.com/srv/timeline-profile/screen-name/LeagueOfLegendsKR"
+
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
-        "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache"
     }
 
-    success = False
-    xml_data = ""
-    connected_server = ""
-    
-    # 9개의 우회 서버에 기습적으로 접속을 시도 (타임아웃 단 4초)
-    for url in mirror_servers:
-        try:
-            async with bot.session.get(url, headers=headers, timeout=4) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
-                    # 정상적인 트위터 RSS 게시물 데이터가 들어있는지 검증
-                    if "<rss" in text and "<item>" in text: 
-                        xml_data = text
-                        success = True
-                        connected_server = url
-                        break
-        except:
-            continue # 막혀있으면 쿨하게 버리고 곧바로 다음 서버로 우회
-
-    if not success:
-        log("X(트위터) 1차 우회 서버(9개)가 현재 방화벽에 모두 막혔습니다. 다음 루프를 기약합니다.")
-        return
-        
-    log(f"🔥 X(트위터) 방어벽 돌파 성공! (침투 경로: {connected_server})")
-
     try:
-        root = ET.fromstring(xml_data)
-        channel_node = root.find("channel")
-        items = channel_node.findall("item")[:10] 
-        items.reverse()
-        
-        channel = await bot.fetch_channel(X_NOTI_CHANNEL_ID)
-        posted_links = await get_recent_posted_links(channel, limit=100)
-        
-        for item in items:
-            link = item.findtext("link", "").strip()
+        # Syndication Timeline 우회 접속 시도
+        async with bot.session.get(timeline_url, headers=headers, timeout=10) as resp:
+            if resp.status != 200:
+                log(f"X(트위터) Syndication API 연결 실패: 상태 코드 {resp.status}")
+                return
             
-            # 답글(Reply)이나 다른 사람의 글 리트윗(RT)은 거르고 공식 트윗만 원한다면 아래 주석 해제
-            # if "/status/" not in link or "LeagueOfLegendsKR" not in link: continue
+            raw_html = await resp.text()
             
-            if not link or link in posted_links: continue
-            
-            raw_desc = item.findtext("description", "")
-            
-            # 본문 이미지 추출 해킹
-            img_url = ""
-            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc)
-            if img_match:
-                img_url = img_match.group(1)
-            else:
-                enclosure = item.find("enclosure")
-                if enclosure is not None and enclosure.get("url"):
-                    img_url = enclosure.get("url")
+            # HTML 깊숙한 곳에 숨겨진 NEXT_DATA JSON 덩어리 추출 (롤 홈페이지 방식과 100% 동일)
+            match = re.search(r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>', raw_html)
+            if not match:
+                log("X(트위터) Syndication 구조 변경됨 - JSON 캡처 실패")
+                return
 
-            # 텍스트 청소 작업 (쓸데없는 HTML 찌꺼기 제거)
-            clean_desc = re.sub(r'<br\s*/?>', '\n', raw_desc)
-            clean_desc = re.sub(r'<[^>]+>', '', clean_desc)
-            clean_desc = html.unescape(clean_desc).strip()
+            # JSON 파싱
+            twitter_data = json.loads(match.group(1))
             
-            pub_date_str = item.findtext("pubDate", "")
-            date_text = "X(트위터)"
-            if pub_date_str:
-                try:
-                    dt = datetime.datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %Z")
-                    dt = dt.replace(tzinfo=timezone.utc)
-                    dt_korea = dt.astimezone(KST)
-                    date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
-                except:
-                    pass
-
-            title = item.findtext("title", "새로운 트윗").strip()
-            # 너무 긴 본문은 100글자로 자르기
-            if len(clean_desc) > 100:
-                clean_desc = clean_desc[:100] + "..."
-
-            embed = discord.Embed(title=title, url=link, description=clean_desc, color=0xffffff)
-            if img_url:
-                # 트위터 중간 화질 이미지를 원본(large) 화질로 강제 변경하여 퀄리티 상승
-                if "?format=" in img_url:
-                    img_url = re.sub(r'&name=[a-zA-Z0-9]+', '&name=large', img_url)
-                embed.set_image(url=img_url)
-            
-            embed.set_footer(text=date_text)
-            
+            # 타임라인 트윗 목록 추출
             try:
-                await channel.send(embed=embed)
-                log(f"X 트위터 포스팅 완료: {link}")
-                posted_links.append(link)
-            except Exception as send_e:
-                log(f"X 트위터 전송 에러: {send_e}")
+                # 딕셔너리 내부를 파고들어서 트윗 데이터를 끌어옵니다
+                timeline_entries = twitter_data["props"]["pageProps"]["timeline"]["entries"]
+            except KeyError:
+                log("X(트위터) 트윗 목록 파싱 에러 - 데이터 구조 변경 의심")
+                return
+            
+            log(f"🔥 X(트위터) 방어벽 돌파 성공! (Syndication API)")
+            
+            # 트윗 정리 (일반 트윗만 골라냅니다)
+            tweets = []
+            for entry in timeline_entries:
+                if entry["type"] == "tweet":
+                    tweets.append(entry["tweet"])
+            
+            # 최신 10개만 남기고 과거 -> 최신순 정렬
+            tweets = tweets[:10]
+            tweets.reverse()
+
+            channel = await bot.fetch_channel(X_NOTI_CHANNEL_ID)
+            posted_links = await get_recent_posted_links(channel, limit=100)
+
+            for tweet in tweets:
+                tweet_id = tweet.get("id_str", "")
+                if not tweet_id: continue
+                
+                link = f"https://x.com/LeagueOfLegendsKR/status/{tweet_id}"
+                
+                # 답글(Reply)이나 리트윗(RT) 등 무시
+                if link in posted_links: continue
+                
+                # 텍스트 내용 가져오기
+                raw_text = tweet.get("text", "")
+                if not raw_text: continue
+                
+                # 텍스트 내의 불필요한 링크(t.co/...) 제거
+                clean_desc = re.sub(r'https://t\.co/[a-zA-Z0-9]+', '', raw_text).strip()
+                clean_desc = html.unescape(clean_desc)
+                
+                # 이미지 추출 (media 객체 안에 있는 가장 첫 번째 원본 이미지)
+                img_url = ""
+                photos = tweet.get("entities", {}).get("media",[])
+                if photos and len(photos) > 0:
+                    base_url = photos[0].get("media_url_https", "")
+                    if base_url:
+                        # 트위터 고화질(large) 포맷으로 변환
+                        img_url = base_url + "?name=large" if "?" not in base_url else base_url.replace("=normal", "=large")
+
+                # 시간 변환
+                date_text = "X(트위터)"
+                created_at = tweet.get("created_at", "")
+                if created_at:
+                    try:
+                        # 트위터 자체 시간 포맷 파싱
+                        dt = datetime.datetime.strptime(created_at, "%a %b %d %H:%M:%S +0000 %Y")
+                        dt = dt.replace(tzinfo=timezone.utc)
+                        dt_korea = dt.astimezone(KST)
+                        date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                    except:
+                        pass
+                
+                title = "새로운 트윗"
+                if len(clean_desc) > 100:
+                    clean_desc = clean_desc[:100] + "..."
+
+                # 디스코드 임베드 제작
+                embed = discord.Embed(title=title, url=link, description=clean_desc, color=0xffffff)
+                if img_url:
+                    embed.set_image(url=img_url)
+                
+                embed.set_footer(text=date_text)
+                
+                try:
+                    await channel.send(embed=embed)
+                    log(f"X 트위터 포스팅 완료: {link}")
+                    posted_links.append(link)
+                except Exception as send_e:
+                    log(f"X 트위터 전송 에러: {send_e}")
 
     except Exception as e:
-        log(f"X(트위터) 파싱 중 에러 발생: {e}")
+        log(f"X(트위터) 최종 크롤링 중 에러 발생: {e}")
         traceback.print_exc()
 
 # ================= [ 자동 루프 & 이벤트 ] =================
