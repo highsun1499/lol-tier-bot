@@ -316,7 +316,7 @@ async def daily_vote_loop():
     try:
         channel = await bot.fetch_channel(VOTE_CHANNEL_ID)
         date_str = datetime.datetime.now(KST).strftime("%Y년 %m월 %d일")
-        poll = discord.Poll(question=f"🎮 {date_str} 오늘 게임하실 건가요? (포지션 선택)", duration=timedelta(hours=11))
+        poll = discord.Poll(question=f"🎮 {date_str} 오늘 게임하실 건가요?", duration=timedelta(hours=11))
         for t, e in[("TOP", "🛡️"), ("JGL", "⚔️"), ("MID", "🔥"), ("SUP", "✨"), ("ADC", "🏹"), ("미정", "❓"), ("불참", "❌")]:
             poll.add_answer(text=t, emoji=e)
         await channel.send(poll=poll)
