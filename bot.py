@@ -181,46 +181,61 @@ async def fetch_and_post_youtube():
         log(f"유튜브 에러: {e}")
         traceback.print_exc()
 
-# ================= [ 핵심 기능 3: X (트위터) RSS 수집 ] =================
+# =================[ 핵심 기능 3: X (트위터) 융단폭격 스크래핑 ] =================
 async def fetch_and_post_x():
-    log("X(트위터) 게시물 체크 중...")
+    log("X(트위터) 방어벽 우회 시도 중...")
     
-    # ★ 수정됨: X(트위터) 우회를 위한 전 세계 Nitter/RSSHub 미러 서버 백업 리스트를 대폭 늘렸습니다.
-    # 위에서부터 차례대로 접속을 시도하고 하나라도 뚫리면 바로 가져옵니다.
-    rss_urls =[
-        "https://rsshub.app/twitter/user/LeagueOfLegendsKR", 
+    # ★ 제미니 특제 백도어: 일론 머스크의 엑스 차단망을 피하기 위해 
+    # 전 세계 개발자들이 몰래 운영하는 비밀 우회 서버(Mirror) 9곳을 차례대로 찌릅니다.
+    mirror_servers =[
         "https://nitter.poast.org/LeagueOfLegendsKR/rss",
-        "https://nitter.cz/LeagueOfLegendsKR/rss",
         "https://nitter.privacydev.net/LeagueOfLegendsKR/rss",
-        "https://nitter.projectsegfau.lt/LeagueOfLegendsKR/rss",
-        "https://mstdn.social/users/LeagueOfLegendsKR.rss" # 완전 막힐 경우를 대비한 대체 라우팅
+        "https://rsshub.rssforever.com/twitter/user/LeagueOfLegendsKR",
+        "https://rsshub.app/twitter/user/LeagueOfLegendsKR",
+        "https://rss.itazuraanime.com/twitter/user/LeagueOfLegendsKR",
+        "https://nitter.cz/LeagueOfLegendsKR/rss",
+        "https://rsshub.lihaoc.com/twitter/user/LeagueOfLegendsKR",
+        "https://rss.peal.cc/twitter/user/LeagueOfLegendsKR",
+        "https://nitter.esmailelbob.xyz/LeagueOfLegendsKR/rss"
     ]
     
+    # 깃허브 봇이 아니라 '평범한 아이폰 유저'인 것처럼 철저하게 신분을 위장합니다.
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1",
+        "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.7",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7"
+    }
+
     success = False
     xml_data = ""
+    connected_server = ""
     
-    # 여러 서버 중 연결되고 내용이 있는 첫 번째 서버를 사용합니다.
-    # timeout을 10초에서 5초로 줄여서, 죽은 서버를 빠르게 손절하고 다음 서버로 넘어가게 최적화했습니다.
-    for url in rss_urls:
+    # 9개의 우회 서버에 기습적으로 접속을 시도 (타임아웃 단 4초)
+    for url in mirror_servers:
         try:
-            async with bot.session.get(url, timeout=5) as resp:
+            async with bot.session.get(url, headers=headers, timeout=4) as resp:
                 if resp.status == 200:
-                    xml_data = await resp.text()
-                    if "<item>" in xml_data: # 정상적인 게시물 데이터가 들어있는지 확인
+                    text = await resp.text()
+                    # 정상적인 트위터 RSS 게시물 데이터가 들어있는지 검증
+                    if "<rss" in text and "<item>" in text: 
+                        xml_data = text
                         success = True
+                        connected_server = url
                         break
         except:
-            continue # 연결 실패(Timeout) 시 다음 서버 주소로 넘어감
-            
+            continue # 막혀있으면 쿨하게 버리고 곧바로 다음 서버로 우회
+
     if not success:
-        log("X(트위터) 무료 RSS 우회 서버들이 현재 모두 막혀있습니다. 1시간 뒤에 다시 시도합니다.")
+        log("X(트위터) 1차 우회 서버(9개)가 현재 방화벽에 모두 막혔습니다. 다음 루프를 기약합니다.")
         return
         
+    log(f"🔥 X(트위터) 방어벽 돌파 성공! (침투 경로: {connected_server})")
+
     try:
         root = ET.fromstring(xml_data)
         channel_node = root.find("channel")
-        items = channel_node.findall("item")[:10] # 최신 10개만
-        items.reverse() # 과거 -> 최신
+        items = channel_node.findall("item")[:10] 
+        items.reverse()
         
         channel = await bot.fetch_channel(X_NOTI_CHANNEL_ID)
         posted_links = await get_recent_posted_links(channel, limit=100)
@@ -228,31 +243,28 @@ async def fetch_and_post_x():
         for item in items:
             link = item.findtext("link", "").strip()
             
-            # 리트윗(RT)이나 답글은 보통 무시하지만 가져오고 싶다면 조건문 제거
-            if link in posted_links: continue
+            # 답글(Reply)이나 다른 사람의 글 리트윗(RT)은 거르고 공식 트윗만 원한다면 아래 주석 해제
+            # if "/status/" not in link or "LeagueOfLegendsKR" not in link: continue
             
-            # 원시 내용(HTML 태그 포함됨)
+            if not link or link in posted_links: continue
+            
             raw_desc = item.findtext("description", "")
             
-            # 사진 찾기 (RSSHub는 보통 img src로 이미지를 넣어줌)
+            # 본문 이미지 추출 해킹
             img_url = ""
             img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc)
             if img_match:
                 img_url = img_match.group(1)
             else:
-                # RSS 표준 첨부파일 방식 확인
                 enclosure = item.find("enclosure")
                 if enclosure is not None and enclosure.get("url"):
                     img_url = enclosure.get("url")
 
-            # 줄바꿈 태그(<br>)를 실제 줄바꿈으로 변환
+            # 텍스트 청소 작업 (쓸데없는 HTML 찌꺼기 제거)
             clean_desc = re.sub(r'<br\s*/?>', '\n', raw_desc)
-            # 나머지 모든 HTML 태그 제거
             clean_desc = re.sub(r'<[^>]+>', '', clean_desc)
-            # 특수기호 복원
             clean_desc = html.unescape(clean_desc).strip()
             
-            # 작성일 포맷팅 (형식: "Mon, 30 Mar 2026 12:00:00 GMT")
             pub_date_str = item.findtext("pubDate", "")
             date_text = "X(트위터)"
             if pub_date_str:
@@ -265,14 +277,13 @@ async def fetch_and_post_x():
                     pass
 
             title = item.findtext("title", "새로운 트윗").strip()
-            
-            # 내용을 100글자 정도로 제한하여 보여줌 (가독성 목적)
+            # 너무 긴 본문은 100글자로 자르기
             if len(clean_desc) > 100:
                 clean_desc = clean_desc[:100] + "..."
 
-            embed = discord.Embed(title=title, url=link, description=clean_desc, color=0xFFFFFF)
+            embed = discord.Embed(title=title, url=link, description=clean_desc, color=0xffffff)
             if img_url:
-                # 트위터 이미지 서버(pbs.twimg.com) 크기 원본으로 맞추기 (옵션)
+                # 트위터 중간 화질 이미지를 원본(large) 화질로 강제 변경하여 퀄리티 상승
                 if "?format=" in img_url:
                     img_url = re.sub(r'&name=[a-zA-Z0-9]+', '&name=large', img_url)
                 embed.set_image(url=img_url)
@@ -284,10 +295,10 @@ async def fetch_and_post_x():
                 log(f"X 트위터 포스팅 완료: {link}")
                 posted_links.append(link)
             except Exception as send_e:
-                log(f"X 트위터 전송 실패: {send_e}")
+                log(f"X 트위터 전송 에러: {send_e}")
 
     except Exception as e:
-        log(f"X 트위터 파싱 에러: {e}")
+        log(f"X(트위터) 파싱 중 에러 발생: {e}")
         traceback.print_exc()
 
 # ================= [ 자동 루프 & 이벤트 ] =================
