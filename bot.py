@@ -122,7 +122,7 @@ async def fetch_and_post_news():
                     dt = datetime.datetime.fromisoformat(pub.replace('Z', '+00:00')).astimezone(KST)
                     date_text = dt.strftime("%Y년 %m월 %d일 %H:%M")
 
-                embed = discord.Embed(title=title, url=link, description=desc[:100], color=0xFFFFFF)
+                embed = discord.Embed(title=title, url=link, description=desc[:100], color=0xc28f2c)
                 if img.startswith('http'): embed.set_image(url=img)
                 embed.set_footer(text=date_text)
                 await channel.send(embed=embed)
