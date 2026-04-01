@@ -179,8 +179,8 @@ async def fetch_and_post_youtube():
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
-    # 레딧은 주소 뒤에 .rss 라고만 붙이면 공식적으로 완벽한 XML 데이터를 내려줍니다! 403 에러 걱정 ZERO!
-    url = "https://www.reddit.com/r/leagueoflegends/new/.rss"
+# ★ 수정됨: 'Riot official' 태그(flair)가 달린 글만 검색해서 최신순(sort=new)으로 가져옵니다!
+    url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     
     # 레딧 본사 요구사항: User-Agent에 고유한 봇 이름과 작성자(아무 단어나 가능) 명시 필수
     headers = {
