@@ -9,6 +9,7 @@ import datetime
 from datetime import time, timezone, timedelta
 import random
 import traceback
+import xml.etree.ElementTree as ET # ★ 레딧 RSS 파싱을 위해 반드시 import 구역에 추가해 주세요!
 
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
@@ -174,73 +175,97 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 공식 RSS 스크래핑 ] =================
 async def fetch_and_post_reddit():
-    log("레딧(Reddit) 게시물 방어벽 확인 없이 바로 긁어오기 시도 중...")
+    log("레딧(Reddit) 공식 RSS 확인 중...")
     
-    # r/leagueoflegends 의 최신 글 10개를 JSON 포맷으로 합법적으로 요청합니다.
-    url = "https://www.reddit.com/r/leagueoflegends/new.json?limit=10"
+    # 레딧은 주소 뒤에 .rss 라고만 붙이면 공식적으로 완벽한 XML 데이터를 내려줍니다! 403 에러 걱정 ZERO!
+    url = "https://www.reddit.com/r/leagueoflegends/new/.rss"
+    
+    # 레딧 본사 요구사항: User-Agent에 고유한 봇 이름과 작성자(아무 단어나 가능) 명시 필수
+    headers = {
+        "User-Agent": "linux:lol-support-bot-rss:v1.0 (by /u/friendlybot)"
+    }
     
     try:
-        async with bot.session.get(url) as resp:
+        async with bot.session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                log(f"레딧 연결 실패 (상태 코드: {resp.status})")
+                log(f"레딧 RSS 연결 실패 (상태 코드: {resp.status})")
                 return
             
-            data = await resp.json()
-            posts = data.get("data", {}).get("children",[])
-            # 과거 글부터 올리기 위해 뒤집습니다
-            posts.reverse()
+            raw_xml = await resp.text()            
+            
+            # XML/RSS 파싱
+            root = ET.fromstring(raw_xml)
+            
+            # 레딧 RSS는 <feed> -> <entry> 구조를 갖습니다 (Atom 포맷)
+            namespace = {'atom': 'http://www.w3.org/2005/Atom'}
+            entries = root.findall('atom:entry', namespace)
+            
+            # 최신 10개만 가져오고 역순(과거->최신)으로 정렬
+            target_entries = entries[:10]
+            target_entries.reverse()
 
             channel = await bot.fetch_channel(REDDIT_NOTI_CHANNEL_ID)
             posted_links = await get_recent_posted_links(channel, limit=100)
             
-            log(f"레딧에서 {len(posts)}개의 게시물을 성공적으로 스캔했습니다.")
+            log(f"레딧 RSS 방어벽 돌파 완료! 게시물 {len(target_entries)}개 확인됨.")
 
-            for post in posts:
-                post_data = post.get("data", {})
+            for entry in target_entries:
+                # 1. 글 고유 링크 추출
+                link_element = entry.find('atom:link', namespace)
+                link = link_element.attrib['href'] if link_element is not None else ""
                 
-                # 레딧 글 고유 링크 (https://www.reddit.com/r/... 형식)
-                permalink = post_data.get("permalink", "")
-                link = f"https://www.reddit.com{permalink}"
+                if not link or link in posted_links: continue
                 
-                # 중복 방지
-                if link in posted_links: continue
+                # 2. 제목 추출
+                title_node = entry.find('atom:title', namespace)
+                title = title_node.text if title_node is not None else "새로운 글"
+                title = html.unescape(title)
                 
-                # 제목과 작성자 추출
-                title = html.unescape(post_data.get("title", ""))
-                author = post_data.get("author", "Unknown")
+                # 3. 본문 (HTML 구조로 줌)
+                content_node = entry.find('atom:content', namespace)
+                content_html = content_node.text if content_node is not None else ""
                 
-                # 본문(selftext) 추출. 없으면(링크나 이미지 전용 글인 경우) 빈 문자열 유지
-                desc = html.unescape(post_data.get("selftext", ""))
+                # 이미지 추출 
+                img_url = ""
+                img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
+                if img_match:
+                    img_url = img_match.group(1)
                 
-                # 본문이 너무 길면 100자로 컷 
+                # 텍스트 청소 (HTML 태그 제거 및 길이 제한)
+                desc = re.sub(r'<br\s*/?>', '\n', content_html)
+                desc = re.sub(r'<[^>]+>', '', desc)
+                desc = html.unescape(desc).strip()
+                # 글 내용에서 맨 앞 'submitted by' 찌꺼기 제거 처리 (선택사항)
+                desc = re.sub(r'^submitted by /u/[^\n]+\n+', '', desc)
+                
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
+                    
+                if not desc:
+                    desc = "여기를 클릭하여 본문을 확인하세요."
                 
-                # 첨부 이미지 추출 (게시물이 사진/움짤인지 확인)
-                img_url = ""
-                # preview 안에 원본 혹은 해상도 조절된 이미지가 존재합니다
-                images = post_data.get("preview", {}).get("images",[])
-                if images:
-                    # url 안의 &amp; 를 & 로 고쳐줘야 이미지가 제대로 뜹니다 
-                    img_url = html.unescape(images[0].get("source", {}).get("url", ""))
-
-                # 작성 시간 포맷 (UTC 기준으로 넘겨주므로 변환해야 함)
-                created_utc = post_data.get("created_utc")
+                # 4. 작성자 추출
+                author_node = entry.find('atom:author/atom:name', namespace)
+                author = author_node.text if author_node is not None else "Unknown"
+                
+                # 5. 작성 시간 
+                pub_node = entry.find('atom:updated', namespace)
                 date_text = "Reddit"
-                if created_utc:
-                    dt = datetime.datetime.fromtimestamp(created_utc, tz=timezone.utc)
-                    dt_korea = dt.astimezone(KST)
-                    date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                if pub_node is not None and pub_node.text:
+                    try:
+                        # 형식: 2026-03-31T14:28:40+00:00
+                        dt = datetime.datetime.fromisoformat(pub_node.text.replace('Z', '+00:00'))
+                        dt_korea = dt.astimezone(KST)
+                        date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                    except:
+                        pass
 
-                # 레딧 오렌지 테마 컬러 (0xFF4500)
+                # 임베드 완성 및 전송 (레딧 고유 색상 오렌지레드 적용)
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
-                
-                # 만약 글에 이미지가 있다면 첨부
                 if img_url:
                     embed.set_image(url=img_url)
-                
                 embed.set_footer(text=date_text)
                 
                 try:
