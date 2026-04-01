@@ -179,12 +179,10 @@ async def fetch_and_post_youtube():
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
-# ★ 수정됨: 'Riot official' 태그(flair)가 달린 글만 검색해서 최신순(sort=new)으로 가져옵니다!
+    # 'Riot official' 태그(flair)가 달린 글만 검색해서 최신순으로 가져옵니다!
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
-    
-    # 레딧 본사 요구사항: User-Agent에 고유한 봇 이름과 작성자(아무 단어나 가능) 명시 필수
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v1.0 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v2.0 (by /u/friendlybot)"
     }
     
     try:
@@ -194,15 +192,10 @@ async def fetch_and_post_reddit():
                 return
             
             raw_xml = await resp.text()            
-            
-            # XML/RSS 파싱
             root = ET.fromstring(raw_xml)
-            
-            # 레딧 RSS는 <feed> -> <entry> 구조를 갖습니다 (Atom 포맷)
             namespace = {'atom': 'http://www.w3.org/2005/Atom'}
             entries = root.findall('atom:entry', namespace)
             
-            # 최신 10개만 가져오고 역순(과거->최신)으로 정렬
             target_entries = entries[:10]
             target_entries.reverse()
 
@@ -223,49 +216,59 @@ async def fetch_and_post_reddit():
                 title = title_node.text if title_node is not None else "새로운 글"
                 title = html.unescape(title)
                 
-                # 3. 본문 (HTML 구조로 줌)
+                # 3. 본문 (HTML) 추출
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # 이미지 추출 
+                # ---[★ 개선된 이미지 & 텍스트 파싱 로직] ---
                 img_url = ""
-                img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
-                if img_match:
-                    img_url = img_match.group(1)
+                # 우선, 첨부된 고화질 이미지(preview.redd.it 또는 i.redd.it)의 진짜 링크를 가로챕니다.
+                high_res_match = re.search(r'<a href="(https://(?:preview|i)\.redd\.it/[^"]+)">', content_html)
+                if high_res_match:
+                    img_url = html.unescape(high_res_match.group(1))
+                else:    
+                    # 고화질 링크가 없으면 일반 썸네일 이미지 주소를 찾습니다.
+                    img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
+                    if img_match:
+                        img_url = html.unescape(img_match.group(1))
                 
-                # 텍스트 청소 (HTML 태그 제거 및 길이 제한)
+                # 텍스트 청소 작업
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
-                # 글 내용에서 맨 앞 'submitted by' 찌꺼기 제거 처리 (선택사항)
-                desc = re.sub(r'^submitted by /u/[^\n]+\n+', '', desc)
+                
+                # 지저분하게 뜨는 본문 작성자, 링크, 댓글 버튼, 그리고 길게 노출된 이미지 주소를 화면에서 없앱니다.
+                desc = re.sub(r'submitted by /u/[^\n]+', '', desc)
+                desc = re.sub(r'\[link\]\s*\[comments\]', '', desc)
+                desc = desc.replace('[comments]', '')
+                desc = re.sub(r'https://(?:preview|i)\.redd\.it/[^\s\n]+', '[첨부 이미지]', desc)
+                
+                # 앞뒤 공백을 깔끔하게 제거
+                desc = desc.strip()
                 
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
                     
-                if not desc:
+                # 필터링하고 남은 본문이 아예 없으면 (사진만 올린 글인 경우)
+                if not desc or desc == "[첨부 이미지]":
                     desc = "여기를 클릭하여 본문을 확인하세요."
+                # -----------------------------------------------
                 
-                # 4. 작성자 추출
-                author_node = entry.find('atom:author/atom:name', namespace)
-                author = author_node.text if author_node is not None else "Unknown"
-                
-                # 5. 작성 시간 
+                # 4. 작성 시간 포맷팅
                 pub_node = entry.find('atom:updated', namespace)
-                date_text = "Reddit"
+                date_text = "Reddit (Riot Official)"
                 if pub_node is not None and pub_node.text:
                     try:
-                        # 형식: 2026-03-31T14:28:40+00:00
                         dt = datetime.datetime.fromisoformat(pub_node.text.replace('Z', '+00:00'))
                         dt_korea = dt.astimezone(KST)
                         date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
                     except:
                         pass
 
-                # 임베드 완성 및 전송 (레딧 고유 색상 오렌지레드 적용)
+                # 임베드 완성
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 if img_url:
-                    embed.set_image(url=img_url)
+                    embed.set_image(url=img_url) # 찾은 짤방을 디스코드 화면 꽉 차게 띄웁니다!
                 embed.set_footer(text=date_text)
                 
                 try:
