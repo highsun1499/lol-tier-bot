@@ -179,10 +179,9 @@ async def fetch_and_post_youtube():
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
-    # 'Riot official' 태그(flair)가 달린 글만 검색해서 최신순으로 가져옵니다!
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v2.1 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v3.0 (by /u/friendlybot)"
     }
     
     try:
@@ -201,8 +200,6 @@ async def fetch_and_post_reddit():
 
             channel = await bot.fetch_channel(REDDIT_NOTI_CHANNEL_ID)
             posted_links = await get_recent_posted_links(channel, limit=100)
-            
-            log(f"레딧 RSS 방어벽 돌파 완료! 게시물 {len(target_entries)}개 확인됨.")
 
             for entry in target_entries:
                 link_element = entry.find('atom:link', namespace)
@@ -217,50 +214,47 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 레딧 이미지 원본 100% 안전 추출 로직] ---
+                # ---[★ 궁극의 가짜 썸네일 차단 & 원본 추출 로직] ---
                 img_url = ""
                 
-                # 1순위: i.redd.it 오리지널 업로드 파일 직접 링크 찾기 (화질 최상)
+                # 1순위: 직접 업로드된 초고화질 i.redd.it 링크
                 direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
                 if direct_match:
                     img_url = direct_match.group(1)
                 
-                # 2순위: preview.redd.it 또는 external-preview.redd.it 이미지
-                # (URL의 암호를 절대 훼손시키지 않고 통째로 가져와 403 에러 원천 차단!)
+                # 2순위: 압축된 preview 링크 (여전히 원본을 가져오도록 우회)
                 if not img_url:
-                    prev_match = re.search(r'src=["\'](https://(?:preview|external-preview)\.redd\.it/[^"\']+)["\']', content_html)
-                    if not prev_match: # src 속성이 없으면 href 링크 조사
-                        prev_match = re.search(r'href=["\'](https://(?:preview|external-preview)\.redd\.it/[^"\']+)["\']', content_html)
-                        
+                    prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
                     if prev_match:
-                        img_url = prev_match.group(1)
-                        
-                # 3순위: 기타 썸네일 최후의 수단
+                        # 썸네일(가짜 이미지)이 아닌 것만 통과!
+                        if "thumbs" not in prev_match.group(1):
+                            img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
+                
+                # 3순위: [특별 조치] 유튜브 링크가 포함된 글이면, 유튜브 썸네일을 직접 추출
                 if not img_url:
-                    thumb_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
-                    if thumb_match:
-                        img_url = thumb_match.group(1)
-                        
-                # 데이터 속에 들어있는 특수문자(&amp; 등)를 정확한 웹 주소 형태(&)로 변환
+                    yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
+                    if yt_match:
+                        yt_id = yt_match.group(1)
+                        # 유튜브 최대 해상도 썸네일을 강제로 만들어버림
+                        img_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
+                
                 if img_url:
                     img_url = html.unescape(img_url)
-                    
-                # [텍스트 청소 작업]
+                
+                # 텍스트 청소 작업
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
                 
-                # 지저분한 레딧 시스템 문구 삭제
-                desc = re.sub(r'^submitted by /u/[^\n]+', '', desc).strip()
+                # 찌꺼기 문자(작성자, 링크) 완벽 제거
+                desc = re.sub(r'(?i)^submitted by /u/[^\n]+', '', desc).strip()
                 desc = re.sub(r'\[link\]\s*\[comments\]', '', desc).strip()
-                desc = desc.replace('[comments]', '').strip()
-                # 길게 노출된 이미지 주소를 심플한 [첨부 이미지] 문구로 변경
-                desc = re.sub(r'https://(?:preview|external-preview|i)\.redd\.it/[^\s\n]+', '[첨부 이미지]', desc)
+                desc = re.sub(r'https://[^\s\n]+', '', desc).strip() # 지저분한 모든 http 하이퍼링크 텍스트 제거
                 
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
                     
-                if not desc or desc == "[첨부 이미지]":
+                if not desc:
                     desc = "여기를 클릭하여 본문을 확인하세요."
                 
                 # 시간 포맷 적용
@@ -277,7 +271,7 @@ async def fetch_and_post_reddit():
                 # 임베드 완성
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
-                # ★ 이미지가 존재하고, 403 봇 방어를 뚫은 가장 고화질의 이미지 출력!
+                # 가짜 썸네일을 버리고, 진짜 이미지가 있을 경우에만 꽉 차게 띄웁니다!
                 if img_url:
                     embed.set_image(url=img_url) 
                 
