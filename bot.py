@@ -232,6 +232,15 @@ async def fetch_and_post_reddit():
                     if img_match:
                         img_url = html.unescape(img_match.group(1))
                 
+                # ★ [핵심 패치]: 작은 썸네일을 디스코드 가로 꽉 차게 만드는 원본(i.redd.it) 주소 강제 변환
+                if img_url and "redd.it" in img_url:
+                    # preview.redd.it/xxxx.png?width=... 형태에서 순수 파일명(xxxx.png)만 뽑아냅니다.
+                    clean_match = re.search(r'https://(?:preview|external-preview|i)\.redd\.it/([^?"]+)', img_url)
+                    if clean_match:
+                        file_name = clean_match.group(1)
+                        # 원본 전용 도메인(i.redd.it)으로 강제 합성하여 디스코드에 투척!
+                        img_url = f"https://i.redd.it/{file_name}"
+              
                 # 텍스트 청소 작업
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
