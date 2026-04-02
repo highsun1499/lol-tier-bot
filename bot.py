@@ -182,7 +182,7 @@ async def fetch_and_post_reddit():
     # 'Riot official' 태그(flair)가 달린 글만 검색해서 최신순으로 가져옵니다!
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v2.0 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v2.1 (by /u/friendlybot)"
     }
     
     try:
@@ -205,65 +205,65 @@ async def fetch_and_post_reddit():
             log(f"레딧 RSS 방어벽 돌파 완료! 게시물 {len(target_entries)}개 확인됨.")
 
             for entry in target_entries:
-                # 1. 글 고유 링크 추출
                 link_element = entry.find('atom:link', namespace)
                 link = link_element.attrib['href'] if link_element is not None else ""
                 
                 if not link or link in posted_links: continue
                 
-                # 2. 제목 추출
                 title_node = entry.find('atom:title', namespace)
                 title = title_node.text if title_node is not None else "새로운 글"
                 title = html.unescape(title)
                 
-                # 3. 본문 (HTML) 추출
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 개선된 이미지 & 텍스트 파싱 로직] ---
+                # ---[★ 레딧 이미지 원본 100% 안전 추출 로직] ---
                 img_url = ""
-                # 우선, 첨부된 고화질 이미지(preview.redd.it 또는 i.redd.it)의 진짜 링크를 가로챕니다.
-                high_res_match = re.search(r'<a href="(https://(?:preview|i)\.redd\.it/[^"]+)">', content_html)
-                if high_res_match:
-                    img_url = html.unescape(high_res_match.group(1))
-                else:    
-                    # 고화질 링크가 없으면 일반 썸네일 이미지 주소를 찾습니다.
-                    img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
-                    if img_match:
-                        img_url = html.unescape(img_match.group(1))
                 
-                # ★ [핵심 패치]: 작은 썸네일을 디스코드 가로 꽉 차게 만드는 원본(i.redd.it) 주소 강제 변환
-                if img_url and "redd.it" in img_url:
-                    # preview.redd.it/xxxx.png?width=... 형태에서 순수 파일명(xxxx.png)만 뽑아냅니다.
-                    clean_match = re.search(r'https://(?:preview|external-preview|i)\.redd\.it/([^?"]+)', img_url)
-                    if clean_match:
-                        file_name = clean_match.group(1)
-                        # 원본 전용 도메인(i.redd.it)으로 강제 합성하여 디스코드에 투척!
-                        img_url = f"https://i.redd.it/{file_name}"
-              
-                # 텍스트 청소 작업
+                # 1순위: i.redd.it 오리지널 업로드 파일 직접 링크 찾기 (화질 최상)
+                direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
+                if direct_match:
+                    img_url = direct_match.group(1)
+                
+                # 2순위: preview.redd.it 또는 external-preview.redd.it 이미지
+                # (URL의 암호를 절대 훼손시키지 않고 통째로 가져와 403 에러 원천 차단!)
+                if not img_url:
+                    prev_match = re.search(r'src=["\'](https://(?:preview|external-preview)\.redd\.it/[^"\']+)["\']', content_html)
+                    if not prev_match: # src 속성이 없으면 href 링크 조사
+                        prev_match = re.search(r'href=["\'](https://(?:preview|external-preview)\.redd\.it/[^"\']+)["\']', content_html)
+                        
+                    if prev_match:
+                        img_url = prev_match.group(1)
+                        
+                # 3순위: 기타 썸네일 최후의 수단
+                if not img_url:
+                    thumb_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', content_html)
+                    if thumb_match:
+                        img_url = thumb_match.group(1)
+                        
+                # 데이터 속에 들어있는 특수문자(&amp; 등)를 정확한 웹 주소 형태(&)로 변환
+                if img_url:
+                    img_url = html.unescape(img_url)
+                    
+                # [텍스트 청소 작업]
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
                 
-                # 지저분하게 뜨는 본문 작성자, 링크, 댓글 버튼, 그리고 길게 노출된 이미지 주소를 화면에서 없앱니다.
-                desc = re.sub(r'submitted by /u/[^\n]+', '', desc)
-                desc = re.sub(r'\[link\]\s*\[comments\]', '', desc)
-                desc = desc.replace('[comments]', '')
-                desc = re.sub(r'https://(?:preview|i)\.redd\.it/[^\s\n]+', '[첨부 이미지]', desc)
-                
-                # 앞뒤 공백을 깔끔하게 제거
-                desc = desc.strip()
+                # 지저분한 레딧 시스템 문구 삭제
+                desc = re.sub(r'^submitted by /u/[^\n]+', '', desc).strip()
+                desc = re.sub(r'\[link\]\s*\[comments\]', '', desc).strip()
+                desc = desc.replace('[comments]', '').strip()
+                # 길게 노출된 이미지 주소를 심플한 [첨부 이미지] 문구로 변경
+                desc = re.sub(r'https://(?:preview|external-preview|i)\.redd\.it/[^\s\n]+', '[첨부 이미지]', desc)
                 
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
                     
-                # 필터링하고 남은 본문이 아예 없으면 (사진만 올린 글인 경우)
                 if not desc or desc == "[첨부 이미지]":
                     desc = "여기를 클릭하여 본문을 확인하세요."
-                # -----------------------------------------------
                 
-                # 4. 작성 시간 포맷팅
+                # 시간 포맷 적용
                 pub_node = entry.find('atom:updated', namespace)
                 date_text = "Reddit (Riot Official)"
                 if pub_node is not None and pub_node.text:
@@ -276,8 +276,11 @@ async def fetch_and_post_reddit():
 
                 # 임베드 완성
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
+                
+                # ★ 이미지가 존재하고, 403 봇 방어를 뚫은 가장 고화질의 이미지 출력!
                 if img_url:
-                    embed.set_image(url=img_url) # 찾은 짤방을 디스코드 화면 꽉 차게 띄웁니다!
+                    embed.set_image(url=img_url) 
+                
                 embed.set_footer(text=date_text)
                 
                 try:
