@@ -176,23 +176,22 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (자가발전 가로 폭 고정판) ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (16:9 황금비율 강제 성형판) ] =================
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v8.0 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v_perfect (by /u/friendlybot)"
     }
     
-    # ★ 궁극기: 파이썬 메모리로 "가로 3000픽셀 x 세로 1픽셀" 크기의 투명한 PNG 그림을 직접 창조해버립니다!
-    # 인터넷 외부 링크를 전혀 쓰지 않으므로 에러 확률이 0%이며 디스코드 가로폭을 가장 강력하게 고정시킵니다.
-    TRANSPARENT_PNG_BYTES = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x0b\xb8\x00\x00\x00\x01\x08\x06\x00\x00\x00m\x87T\x82\x00\x00\x00\x0bIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\r\xef\x11X\x00\x00\x00\x00IEND\xaeB`\x82'
+    # ★ 사진이 없을 때 빈칸을 16:9로 꽉 채워줄 롤 공식 와이드 배경
+    DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                log(f"레딧 RSS 연결 실패 ({resp.status})")
+                log(f"레딧 연결 실패 ({resp.status})")
                 return
             
             raw_xml = await resp.text()            
@@ -219,45 +218,34 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 고해상도(가로 꽉참) 이미지 찾기] ---
-                main_img_url = ""
-                thumb_img_url = ""
+                # ---[원본 이미지 추출기]---
+                img_url = ""
                 
-                # 1순위: 오리지널 고화질 링크
                 direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
                 if direct_match:
-                    main_img_url = html.unescape(direct_match.group(1))
+                    img_url = html.unescape(direct_match.group(1))
                 
-                # 2순위: 압축된 프리뷰 이미지 원본화
-                if not main_img_url:
+                if not img_url:
                     prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
                     if prev_match and "thumbs" not in prev_match.group(1):
-                        main_img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
+                        img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
                 
-                # 3순위: 유튜브 글이면 유튜브 썸네일로
-                if not main_img_url:
+                if not img_url:
                     yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
                     if yt_match:
-                        main_img_url = f"https://img.youtube.com/vi/{yt_match.group(1)}/maxresdefault.jpg"
+                        yt_id = yt_match.group(1)
+                        img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
                 
-                # 4순위: 화질구지 작은 썸네일은 작은 칸용(우측)으로 따로 모시기
-                if not main_img_url:
-                    thumb_match = re.search(r'<img[^>]+src=["\']([^"\']+(?:thumbs)[^"\']+)["\']', content_html)
-                    if thumb_match:
-                        thumb_img_url = html.unescape(thumb_match.group(1))
+                if img_url:
+                    img_url = html.unescape(img_url)
                 
-                if main_img_url:
-                    main_img_url = html.unescape(main_img_url)
-                
-                # ---[★ 텍스트 완벽 크린룸 청소] ---
+                # ---[텍스트 청소]---
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
-                
-                # 정규식 패턴의 한계를 돌파! "submitted by" 등 찌꺼기가 본문 앞이든 어디든 발견되면 모조리 뽑아버림!
-                desc = re.sub(r'(?i)\s*submitted by\s*/u/[\w-]+\s*', '', desc) 
+                desc = re.sub(r'(?i)^submitted by /u/[^\n]+', '', desc).strip()
                 desc = re.sub(r'\[link\]\s*\[comments\]', '', desc).strip()
-                desc = re.sub(r'https?://[^\s\n]+', '', desc).strip()
+                desc = re.sub(r'https?://[^\s\n]+', '', desc).strip() 
                 
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
@@ -277,31 +265,24 @@ async def fetch_and_post_reddit():
 
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
-                files_to_send =[] # 디스코드에 메세지와 함께 보낼 첨부파일 리스트
-
-                # ★[가로 폭 고정 꼼수 종결판] 
-                if main_img_url:
-                    embed.set_image(url=main_img_url) 
+                # =========================================================================
+                # ★[제미니 최종 승부수: 16:9 와이드 카드 실시간 성형 로직] ★
+                # =========================================================================
+                if img_url:
+                    # 사진이 있을 경우, 무료 클라우드 서버(wsrv.nl)를 경유시켜 강제로 16:9 (1920x1080) 액자에 우겨넣습니다!
+                    # 원본이 잘리거나 비율이 좁은 경우 양옆에 디스코드 다크 테마 색상(2B2D31)으로 레터박스를 채워버립니다.
+                    # 이를 통해 디스코드는 무조건 16:9 와이드 카드(Max Width)를 그려내게 강제됩니다.
+                    forced_16_9_url = f"https://wsrv.nl/?url={img_url}&w=1920&h=1080&fit=contain&cbg=2B2D31"
+                    embed.set_image(url=forced_16_9_url) 
                 else:
-                    # 사진이 없는 텍스트 글이면, 우리가 파이썬으로 갓 구워낸 "가로 3000px 투명 사진"을 파일로 첨부합니다!
-                    # 이 사진은 투명하므로 눈에 안 보이지만, 디스코드 봇은 사진의 거대한 크기에 압도되어 카드를 끝까지 벌려버립니다!
-                    image_file = discord.File(io.BytesIO(TRANSPARENT_PNG_BYTES), filename="spacer.png")
-                    files_to_send.append(image_file)
-                    embed.set_image(url="attachment://spacer.png")
-                    
-                    # 화질구지 작은 썸네일은 우측 상단 아이콘 구석에 따로 띄웁니다.
-                    if thumb_img_url:
-                        embed.set_thumbnail(url=thumb_img_url)
+                    # 사진이 아예 없는 텍스트 전용 글일 경우, 무조건 16:9 와이드 비율의 롤 공식 일러스트를 박아 넣습니다!
+                    embed.set_image(url=DEFAULT_WIDE_BANNER)
+                # =========================================================================
                 
                 embed.set_footer(text=date_text)
                 
                 try:
-                    # 파일 데이터가 있으면 파일과 함께 메세지 전송, 없으면 그냥 전송
-                    if files_to_send:
-                        await channel.send(embed=embed, files=files_to_send)
-                    else:
-                        await channel.send(embed=embed)
-                        
+                    await channel.send(embed=embed)
                     log(f"레딧 포스팅 완료: {title[:20]}...")
                     posted_links.append(link)
                 except Exception as send_e:
