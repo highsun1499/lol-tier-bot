@@ -10,6 +10,7 @@ from datetime import time, timezone, timedelta
 import random
 import traceback
 import xml.etree.ElementTree as ET # ★ 레딧 RSS 파싱을 위해 반드시 import 구역에 추가해 주세요!
+import io
 
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
@@ -175,18 +176,18 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 공식 RSS 스크래핑 (디스코드 글씨 폭 강제 연장판) ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (자가발전 가로 폭 고정판) ] =================
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v7.0 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v8.0 (by /u/friendlybot)"
     }
     
-    # ★ 외부 이미지(Imgur 등) 절대 금지! 디스코드 자체 텍스트 엔징을 속여서 가로 폭을 극대화하는 투명 글자판!
-    # 눈에 보이지 않는 공백 문자(\u200B)와 스페이스를 엄청나게 길게 이어 붙여 무형의 막대기를 만듭니다.
-    INVISIBLE_WIDTH_FORCER = "\u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B " * 15 # 약 150개의 거대한 투명 스페이스 뭉치
+    # ★ 궁극기: 파이썬 메모리로 "가로 3000픽셀 x 세로 1픽셀" 크기의 투명한 PNG 그림을 직접 창조해버립니다!
+    # 인터넷 외부 링크를 전혀 쓰지 않으므로 에러 확률이 0%이며 디스코드 가로폭을 가장 강력하게 고정시킵니다.
+    TRANSPARENT_PNG_BYTES = b'\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x0b\xb8\x00\x00\x00\x01\x08\x06\x00\x00\x00m\x87T\x82\x00\x00\x00\x0bIDATx\x9cc\xf8\xff\xff?\x00\x05\xfe\x02\xfe\r\xef\x11X\x00\x00\x00\x00IEND\xaeB`\x82'
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
@@ -218,54 +219,51 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 훼손 ZERO, 퀄리티 100% 원본 이미지 추출 로직] ---
-                img_url = ""
+                # ---[★ 고해상도(가로 꽉참) 이미지 찾기] ---
+                main_img_url = ""
                 thumb_img_url = ""
                 
-                # 1순위: 직접 업로드된 초고화질 i.redd.it 링크
+                # 1순위: 오리지널 고화질 링크
                 direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
                 if direct_match:
-                    img_url = html.unescape(direct_match.group(1))
+                    main_img_url = html.unescape(direct_match.group(1))
                 
-                # 2순위: 압축된 preview 링크 중 가로로 큼지막한 원본 사진
-                if not img_url:
+                # 2순위: 압축된 프리뷰 이미지 원본화
+                if not main_img_url:
                     prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
                     if prev_match and "thumbs" not in prev_match.group(1):
-                        img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
+                        main_img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
                 
-                # 3순위: 유튜브 게시물이면 유튜브 공식 오리지널 넓적한 썸네일 강제 호출!
-                if not img_url:
+                # 3순위: 유튜브 글이면 유튜브 썸네일로
+                if not main_img_url:
                     yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
                     if yt_match:
-                        yt_id = yt_match.group(1)
-                        img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
+                        main_img_url = f"https://img.youtube.com/vi/{yt_match.group(1)}/maxresdefault.jpg"
                 
-                # 4순위: 화질 저하의 주범인 쪼그만 썸네일(thumbs)은 메인에서 버리고 작은 그림 칸에 유배!
-                if not img_url:
+                # 4순위: 화질구지 작은 썸네일은 작은 칸용(우측)으로 따로 모시기
+                if not main_img_url:
                     thumb_match = re.search(r'<img[^>]+src=["\']([^"\']+(?:thumbs)[^"\']+)["\']', content_html)
                     if thumb_match:
                         thumb_img_url = html.unescape(thumb_match.group(1))
                 
-                if img_url:
-                    img_url = html.unescape(img_url)
+                if main_img_url:
+                    main_img_url = html.unescape(main_img_url)
                 
-                # 텍스트 청소 작업
+                # ---[★ 텍스트 완벽 크린룸 청소] ---
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
-                desc = re.sub(r'(?i)^submitted by /u/[^\n]+', '', desc).strip()
+                
+                # 정규식 패턴의 한계를 돌파! "submitted by" 등 찌꺼기가 본문 앞이든 어디든 발견되면 모조리 뽑아버림!
+                desc = re.sub(r'(?i)\s*submitted by\s*/u/[\w-]+\s*', '', desc) 
                 desc = re.sub(r'\[link\]\s*\[comments\]', '', desc).strip()
-                desc = re.sub(r'https?://[^\s\n]+', '', desc).strip() 
+                desc = re.sub(r'https?://[^\s\n]+', '', desc).strip()
                 
                 if len(desc) > 100:
                     desc = desc[:100] + "..."
                     
                 if not desc:
                     desc = "여기를 클릭하여 본문을 확인하세요."
-                
-                # ★ [가로 폭 고정 꼼수 2.0 (텍스트 지지대판)]: 본문 맨 밑에 거대한 투명 스페이스 덩어리를 달아서 
-                # 디스코드가 "와, 본문 글씨 폭이 진짜 넓네!" 하고 착각하게 만들어 카드를 꽉 채우게 강제 확장시킵니다!!
-                desc += f"\n\n{INVISIBLE_WIDTH_FORCER}"
                 
                 pub_node = entry.find('atom:updated', namespace)
                 date_text = "Reddit (Riot Official)"
@@ -279,16 +277,31 @@ async def fetch_and_post_reddit():
 
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
-                if img_url:
-                    embed.set_image(url=img_url) 
-                
-                if thumb_img_url:
-                    embed.set_thumbnail(url=thumb_img_url)
+                files_to_send =[] # 디스코드에 메세지와 함께 보낼 첨부파일 리스트
+
+                # ★[가로 폭 고정 꼼수 종결판] 
+                if main_img_url:
+                    embed.set_image(url=main_img_url) 
+                else:
+                    # 사진이 없는 텍스트 글이면, 우리가 파이썬으로 갓 구워낸 "가로 3000px 투명 사진"을 파일로 첨부합니다!
+                    # 이 사진은 투명하므로 눈에 안 보이지만, 디스코드 봇은 사진의 거대한 크기에 압도되어 카드를 끝까지 벌려버립니다!
+                    image_file = discord.File(io.BytesIO(TRANSPARENT_PNG_BYTES), filename="spacer.png")
+                    files_to_send.append(image_file)
+                    embed.set_image(url="attachment://spacer.png")
+                    
+                    # 화질구지 작은 썸네일은 우측 상단 아이콘 구석에 따로 띄웁니다.
+                    if thumb_img_url:
+                        embed.set_thumbnail(url=thumb_img_url)
                 
                 embed.set_footer(text=date_text)
                 
                 try:
-                    await channel.send(embed=embed)
+                    # 파일 데이터가 있으면 파일과 함께 메세지 전송, 없으면 그냥 전송
+                    if files_to_send:
+                        await channel.send(embed=embed, files=files_to_send)
+                    else:
+                        await channel.send(embed=embed)
+                        
                     log(f"레딧 포스팅 완료: {title[:20]}...")
                     posted_links.append(link)
                 except Exception as send_e:
