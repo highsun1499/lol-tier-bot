@@ -175,18 +175,18 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 공식 RSS 스크래핑 (가로 폭 완벽 고정) ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 공식 RSS 스크래핑 (디스코드 글씨 폭 강제 연장판) ] =================
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v6.0 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v7.0 (by /u/friendlybot)"
     }
     
-    # ★ 핵심 해법: 가로 폭을 강제 고정하기 위한 400x1 픽셀짜리 가로로 길쭉한 투명 막대기 이미지입니다.
-    # 이것이 디스코드 카드 너비(약 400px 내외)를 언제나 꽉 채우도록 잡아줍니다!
-    INVISIBLE_SPACER = "https://i.imgur.com/ZWX04kC.png" 
+    # ★ 외부 이미지(Imgur 등) 절대 금지! 디스코드 자체 텍스트 엔징을 속여서 가로 폭을 극대화하는 투명 글자판!
+    # 눈에 보이지 않는 공백 문자(\u200B)와 스페이스를 엄청나게 길게 이어 붙여 무형의 막대기를 만듭니다.
+    INVISIBLE_WIDTH_FORCER = "\u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B \u200B " * 15 # 약 150개의 거대한 투명 스페이스 뭉치
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
@@ -218,35 +218,36 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 고해상도(가로 확장용) 이미지 찾기] ---
-                main_img_url = ""
+                # ---[★ 훼손 ZERO, 퀄리티 100% 원본 이미지 추출 로직] ---
+                img_url = ""
                 thumb_img_url = ""
                 
                 # 1순위: 직접 업로드된 초고화질 i.redd.it 링크
                 direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
                 if direct_match:
-                    main_img_url = html.unescape(direct_match.group(1))
+                    img_url = html.unescape(direct_match.group(1))
                 
-                # 2순위: 압축된 preview 링크 중 가로로 큰 원본
-                if not main_img_url:
+                # 2순위: 압축된 preview 링크 중 가로로 큼지막한 원본 사진
+                if not img_url:
                     prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
                     if prev_match and "thumbs" not in prev_match.group(1):
-                        main_img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
+                        img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
                 
-                # 3순위: 유튜브 글이면 유튜브 썸네일로 가로를 꽉 채웁니다
-                if not main_img_url:
+                # 3순위: 유튜브 게시물이면 유튜브 공식 오리지널 넓적한 썸네일 강제 호출!
+                if not img_url:
                     yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
                     if yt_match:
-                        main_img_url = f"https://img.youtube.com/vi/{yt_match.group(1)}/maxresdefault.jpg"
+                        yt_id = yt_match.group(1)
+                        img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
                 
-                # 4순위: 화질구지 작은 썸네일(thumbs) 뿐이라면 메인이 아니라 우측 상단 '작은 그림(Thumbnail)'용으로 따로 빼둡니다.
-                if not main_img_url:
+                # 4순위: 화질 저하의 주범인 쪼그만 썸네일(thumbs)은 메인에서 버리고 작은 그림 칸에 유배!
+                if not img_url:
                     thumb_match = re.search(r'<img[^>]+src=["\']([^"\']+(?:thumbs)[^"\']+)["\']', content_html)
                     if thumb_match:
                         thumb_img_url = html.unescape(thumb_match.group(1))
                 
-                if main_img_url:
-                    main_img_url = html.unescape(main_img_url)
+                if img_url:
+                    img_url = html.unescape(img_url)
                 
                 # 텍스트 청소 작업
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
@@ -262,6 +263,10 @@ async def fetch_and_post_reddit():
                 if not desc:
                     desc = "여기를 클릭하여 본문을 확인하세요."
                 
+                # ★ [가로 폭 고정 꼼수 2.0 (텍스트 지지대판)]: 본문 맨 밑에 거대한 투명 스페이스 덩어리를 달아서 
+                # 디스코드가 "와, 본문 글씨 폭이 진짜 넓네!" 하고 착각하게 만들어 카드를 꽉 채우게 강제 확장시킵니다!!
+                desc += f"\n\n{INVISIBLE_WIDTH_FORCER}"
+                
                 pub_node = entry.find('atom:updated', namespace)
                 date_text = "Reddit (Riot Official)"
                 if pub_node is not None and pub_node.text:
@@ -272,21 +277,13 @@ async def fetch_and_post_reddit():
                     except:
                         pass
 
-                # 임베드 완성
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
-                # ★ [가로 폭 고정 꼼수] 
-                if main_img_url:
-                    # 가로를 꽉 채울 큰 원본 사진이 있으면 메인 자리에 줍니다. 박스는 자연스럽게 사진 크기만큼 넓어집니다.
-                    embed.set_image(url=main_img_url) 
-                else:
-                    # 큰 사진이 없으면(텍스트글이거나 찌그러진 썸네일뿐이면), 
-                    # 400x1픽셀짜리 길쭉한 투명 이미지를 메인 자리에 박아서 디스코드에게 "가로를 꽉 채워라!"라고 명령합니다!
-                    embed.set_image(url=INVISIBLE_SPACER)
-                    
-                    # 그리고 찌그러진 썸네일은 우측 상단 빈 공간(Thumbnail)에 조신하게 띄워줍니다.
-                    if thumb_img_url:
-                        embed.set_thumbnail(url=thumb_img_url)
+                if img_url:
+                    embed.set_image(url=img_url) 
+                
+                if thumb_img_url:
+                    embed.set_thumbnail(url=thumb_img_url)
                 
                 embed.set_footer(text=date_text)
                 
