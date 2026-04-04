@@ -10,7 +10,6 @@ from datetime import time, timezone, timedelta
 import random
 import traceback
 import xml.etree.ElementTree as ET # ★ 레딧 RSS 파싱을 위해 반드시 import 구역에 추가해 주세요!
-import io
 
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
