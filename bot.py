@@ -10,6 +10,7 @@ from datetime import time, timezone, timedelta
 import random
 import traceback
 import xml.etree.ElementTree as ET # ★ 레딧 RSS 파싱을 위해 반드시 import 구역에 추가해 주세요!
+import urllib.parse
 
 # ================= [ 설정 구역 ] =================
 RIOT_API_KEY = os.getenv("RIOT_API_KEY")
@@ -175,17 +176,16 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (16:9 강제 크롭 & 썸네일 완벽 추출판) ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (16:9 꽉 찬 화면 최종 종결판!) ] =================
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v_perfect_16_9 (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v_absolute_final (by /u/friendlybot)"
     }
     
-    # 기본 와이드 배너 (사진/링크가 없는 순수 텍스트 공지사항을 위한 롤 오피셜 무적 배경)
-    DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
+    DEFAULT_WIDE_BANNER = "https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/3984f3702ad8dd3ea9127c0bfe5c4d4d6faf6401-3000x2000.jpg"
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
@@ -217,7 +217,7 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[★ 16:9 완벽 썸네일 탐색기]---
+                # ---[★ 16:9 완벽 썸네일 탐색기 (버그 완전 수정!)]---
                 img_url = ""
                 
                 # 1순위: 유튜브 영상 탐색 
@@ -226,14 +226,14 @@ async def fetch_and_post_reddit():
                     yt_id = yt_match.group(1)
                     img_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
                 
-                # 2순위: 롤 공식 홈페이지 링크를 파고들어 썸네일 직접 강탈!! (패치노트 이미지 해결사)
+                # 2순위: 롤 공식 홈페이지 링크 (★ riotgames.com, teamfighttactics 도메인 추가 등록 완료!)
                 if not img_url:
                     article_match = re.search(r'<a href=["\']([^"\']+)["\']>\[link\]</a>', content_html)
                     if article_match:
                         article_url = html.unescape(article_match.group(1))
-                        if "leagueoflegends.com" in article_url or "lolesports.com" in article_url:
+                        if any(domain in article_url for domain in["leagueoflegends.com", "lolesports.com", "riotgames.com", "teamfighttactics"]):
                             try:
-                                headers_riot = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                                headers_riot = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
                                 async with bot.session.get(article_url, headers=headers_riot, timeout=3) as a_resp:
                                     if a_resp.status == 200:
                                         a_html = await a_resp.text()
@@ -243,23 +243,25 @@ async def fetch_and_post_reddit():
                             except Exception as og_err:
                                 log(f"OG 이미지 추출 에러: {og_err}")
 
-                # 3순위: 글 작성자가 직접 올린 레딧 자체 이미지(i.redd.it)
+                # 3순위: 디렉트 이미지 링크 (i.redd.it)
                 if not img_url:
                     direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
                     if direct_match:
                         img_url = html.unescape(direct_match.group(1))
                 
-                # 4순위: 압축된 프리뷰 이미지 원본 복구
+                # 4순위: 레딧 자동 생성 미리보기 (★ 정규식 수정: ? 뒷부분 훼손 없이 보안 서명 100% 캡처!)
                 if not img_url:
-                    prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
-                    if prev_match and "thumbs" not in prev_match.group(1):
-                        img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
+                    prev_match = re.search(r'href=["\'](https://(?:preview|external-preview)\.redd\.it/[^"\']+)["\']', content_html)
+                    if prev_match:
+                        full_preview_url = html.unescape(prev_match.group(1))
+                        if "thumbs" not in full_preview_url:
+                            img_url = full_preview_url # 절대 바꾸거나 훼손하지 않고 있는 그대로 씁니다.
                         
-                # 5순위: 썸네일도 없고, 주소도 없고, 오직 텍스트만 있는 글 -> 공식 배경 배너!
+                # 5순위: 텍스트 전용 글 -> 16:9 공홈 배경
                 if not img_url:
                     img_url = DEFAULT_WIDE_BANNER
 
-                # === 텍스트 클리닝 (찌꺼기 무자비하게 완전 소각) ===
+                # === 텍스트 클리닝 ===
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
@@ -280,18 +282,22 @@ async def fetch_and_post_reddit():
                     try:
                         dt = datetime.datetime.fromisoformat(pub_node.text.replace('Z', '+00:00'))
                         dt_korea = dt.astimezone(KST)
-                        date_text = f"Reddit (Riot Official) • {dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                        date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
                     except:
                         pass
 
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
                 # =========================================================================
-                # ★[최종 병기: 어떤 사진이든 16:9로 "확대시켜 꽉 차게 잘라내는(Cover)" 마법] ★
-                # fit=cover 옵션 덕분에 회색 여백 바가 생기지 않습니다. 
-                # 핸드폰 화면 비율 사진조차도 확대해서 아름다운 16:9 프레임에 꽉 맞게 담아냅니다.
+                # ★[최종 관문: 충돌 방지 인코딩 & 16:9 성형 로직] ★
                 # =========================================================================
-                forced_16_9_url = f"https://wsrv.nl/?url={img_url}&w=1920&h=1080&fit=cover"
+                import urllib.parse
+                
+                # 레딧 URL에 들어있는 ?와 & 기호가 이미지 성형 API(wsrv.nl)의 기호와 겹쳐서 고장나는 것을 막기 위해,
+                # 레딧 이미지 주소만 안전하게 16진수로 인코딩(랩핑)시켜줍니다. 
+                encoded_img_url = urllib.parse.quote(img_url, safe=':/')
+                
+                forced_16_9_url = f"https://wsrv.nl/?url={encoded_img_url}&w=1920&h=1080&fit=cover&cbg=1A1A1C"
                 embed.set_image(url=forced_16_9_url) 
                 
                 embed.set_footer(text=date_text)
