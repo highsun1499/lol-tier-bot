@@ -185,7 +185,7 @@ async def fetch_and_post_reddit():
         "User-Agent": "linux:lol-support-bot-rss:v_absolute_final (by /u/friendlybot)"
     }
     
-    DEFAULT_WIDE_BANNER = "https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/3984f3702ad8dd3ea9127c0bfe5c4d4d6faf6401-3000x2000.jpg"
+    DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
