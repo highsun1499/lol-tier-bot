@@ -175,22 +175,22 @@ async def fetch_and_post_youtube():
                 
     except Exception as e: log(f"유튜브 에러: {e}")
 
-# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (16:9 황금비율 강제 성형판) ] =================
+# =================[ 핵심 기능 3: 레딧(Reddit) 스크래핑 (16:9 강제 크롭 & 썸네일 완벽 추출판) ] =================
 async def fetch_and_post_reddit():
     log("레딧(Reddit) 공식 RSS 확인 중...")
     
     url = "https://www.reddit.com/r/leagueoflegends/search.rss?q=flair%3A%22Riot+official%22&restrict_sr=on&sort=new&t=all"
     headers = {
-        "User-Agent": "linux:lol-support-bot-rss:v_perfect (by /u/friendlybot)"
+        "User-Agent": "linux:lol-support-bot-rss:v_perfect_16_9 (by /u/friendlybot)"
     }
     
-    # ★ 사진이 없을 때 빈칸을 16:9로 꽉 채워줄 롤 공식 와이드 배경
+    # 기본 와이드 배너 (사진/링크가 없는 순수 텍스트 공지사항을 위한 롤 오피셜 무적 배경)
     DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
 
     try:
         async with bot.session.get(url, headers=headers) as resp:
             if resp.status != 200:
-                log(f"레딧 연결 실패 ({resp.status})")
+                log(f"레딧 RSS 연결 실패 ({resp.status})")
                 return
             
             raw_xml = await resp.text()            
@@ -217,33 +217,55 @@ async def fetch_and_post_reddit():
                 content_node = entry.find('atom:content', namespace)
                 content_html = content_node.text if content_node is not None else ""
                 
-                # ---[원본 이미지 추출기]---
+                # ---[★ 16:9 완벽 썸네일 탐색기]---
                 img_url = ""
                 
-                direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
-                if direct_match:
-                    img_url = html.unescape(direct_match.group(1))
+                # 1순위: 유튜브 영상 탐색 
+                yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
+                if yt_match:
+                    yt_id = yt_match.group(1)
+                    img_url = f"https://img.youtube.com/vi/{yt_id}/hqdefault.jpg"
                 
+                # 2순위: 롤 공식 홈페이지 링크를 파고들어 썸네일 직접 강탈!! (패치노트 이미지 해결사)
+                if not img_url:
+                    article_match = re.search(r'<a href=["\']([^"\']+)["\']>\[link\]</a>', content_html)
+                    if article_match:
+                        article_url = html.unescape(article_match.group(1))
+                        if "leagueoflegends.com" in article_url or "lolesports.com" in article_url:
+                            try:
+                                headers_riot = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"}
+                                async with bot.session.get(article_url, headers=headers_riot, timeout=3) as a_resp:
+                                    if a_resp.status == 200:
+                                        a_html = await a_resp.text()
+                                        og_m = re.search(r'<meta property="og:image" content=["\']([^"\']+)["\']', a_html)
+                                        if og_m:
+                                            img_url = html.unescape(og_m.group(1))
+                            except Exception as og_err:
+                                log(f"OG 이미지 추출 에러: {og_err}")
+
+                # 3순위: 글 작성자가 직접 올린 레딧 자체 이미지(i.redd.it)
+                if not img_url:
+                    direct_match = re.search(r'href=["\'](https://i\.redd\.it/[^"\']+)["\']', content_html)
+                    if direct_match:
+                        img_url = html.unescape(direct_match.group(1))
+                
+                # 4순위: 압축된 프리뷰 이미지 원본 복구
                 if not img_url:
                     prev_match = re.search(r'(https://(?:preview|external-preview)\.redd\.it/[^"\'?]+)', content_html)
                     if prev_match and "thumbs" not in prev_match.group(1):
                         img_url = prev_match.group(1).replace("external-preview", "i").replace("preview", "i")
-                
+                        
+                # 5순위: 썸네일도 없고, 주소도 없고, 오직 텍스트만 있는 글 -> 공식 배경 배너!
                 if not img_url:
-                    yt_match = re.search(r'href=["\']https://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)([^"\'&?]+)', content_html)
-                    if yt_match:
-                        yt_id = yt_match.group(1)
-                        img_url = f"https://img.youtube.com/vi/{yt_id}/maxresdefault.jpg"
-                
-                if img_url:
-                    img_url = html.unescape(img_url)
-                
-                # ---[텍스트 청소]---
+                    img_url = DEFAULT_WIDE_BANNER
+
+                # === 텍스트 클리닝 (찌꺼기 무자비하게 완전 소각) ===
                 desc = re.sub(r'<br\s*/?>', '\n', content_html)
                 desc = re.sub(r'<[^>]+>', '', desc)
                 desc = html.unescape(desc).strip()
-                desc = re.sub(r'(?i)^submitted by /u/[^\n]+', '', desc).strip()
-                desc = re.sub(r'\[link\]\s*\[comments\]', '', desc).strip()
+                
+                desc = re.sub(r'(?i)submitted by\s+/u/[\w-]+', '', desc).strip()
+                desc = desc.replace('[link]', '').replace('[comments]', '').strip()
                 desc = re.sub(r'https?://[^\s\n]+', '', desc).strip() 
                 
                 if len(desc) > 100:
@@ -258,25 +280,19 @@ async def fetch_and_post_reddit():
                     try:
                         dt = datetime.datetime.fromisoformat(pub_node.text.replace('Z', '+00:00'))
                         dt_korea = dt.astimezone(KST)
-                        date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                        date_text = f"Reddit (Riot Official) • {dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
                     except:
                         pass
 
                 embed = discord.Embed(title=title, url=link, description=desc, color=0xFF4500)
                 
                 # =========================================================================
-                # ★[제미니 최종 승부수: 16:9 와이드 카드 실시간 성형 로직] ★
+                # ★[최종 병기: 어떤 사진이든 16:9로 "확대시켜 꽉 차게 잘라내는(Cover)" 마법] ★
+                # fit=cover 옵션 덕분에 회색 여백 바가 생기지 않습니다. 
+                # 핸드폰 화면 비율 사진조차도 확대해서 아름다운 16:9 프레임에 꽉 맞게 담아냅니다.
                 # =========================================================================
-                if img_url:
-                    # 사진이 있을 경우, 무료 클라우드 서버(wsrv.nl)를 경유시켜 강제로 16:9 (1920x1080) 액자에 우겨넣습니다!
-                    # 원본이 잘리거나 비율이 좁은 경우 양옆에 디스코드 다크 테마 색상(2B2D31)으로 레터박스를 채워버립니다.
-                    # 이를 통해 디스코드는 무조건 16:9 와이드 카드(Max Width)를 그려내게 강제됩니다.
-                    forced_16_9_url = f"https://wsrv.nl/?url={img_url}&w=1920&h=1080&fit=contain&cbg=2B2D31"
-                    embed.set_image(url=forced_16_9_url) 
-                else:
-                    # 사진이 아예 없는 텍스트 전용 글일 경우, 무조건 16:9 와이드 비율의 롤 공식 일러스트를 박아 넣습니다!
-                    embed.set_image(url=DEFAULT_WIDE_BANNER)
-                # =========================================================================
+                forced_16_9_url = f"https://wsrv.nl/?url={img_url}&w=1920&h=1080&fit=cover"
+                embed.set_image(url=forced_16_9_url) 
                 
                 embed.set_footer(text=date_text)
                 
