@@ -22,6 +22,7 @@ NEWS_CHANNEL_ID = 1480944831600656384
 VOTE_CHANNEL_ID = 1484797598241128598  
 YT_NOTI_CHANNEL_ID = 1487481812874825879
 REDDIT_NOTI_CHANNEL_ID = 1487488570791821443
+INSTA_NOTI_CHANNEL_ID = 1487486449736614109
 
 KST = timezone(timedelta(hours=9))
 SCHEDULED_VOTE_TIME = time(hour=13, minute=0, second=0, tzinfo=KST)
@@ -313,13 +314,134 @@ async def fetch_and_post_reddit():
         log(f"레딧 파싱 중 에러 발생: {e}")
         traceback.print_exc()
 
+# =================[ 핵심 기능 4: 인스타그램(Instagram) 다중 우회 스크래핑 (16:9 와이드 성형) ] =================
+async def fetch_and_post_instagram():
+    log("인스타그램 방어벽 우회 시도 중...")
+    
+    # ★ 메타(인스타) 방어벽 우회: 전 세계 개발자들이 몰래 캐싱해두는 RSS 미러 융단폭격
+    ig_mirrors =[
+        "https://rsshub.app/instagram/user/leagueoflegendskorea",
+        "https://rsshub.rssforever.com/instagram/user/leagueoflegendskorea",
+        "https://rsshub.lihaoc.com/instagram/user/leagueoflegendskorea",
+        "https://rss.itazuraanime.com/instagram/user/leagueoflegendskorea"
+    ]
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+    }
+
+    # 사진이 없거나 로딩 실패 시 띄워줄 리그 오브 레전드 공식 16:9 와이드 배경
+    DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
+
+    success = False
+    xml_data = ""
+    
+    # 1. RSS 미러 서버들 순차적으로 기습 접속 (타임아웃 5초)
+    for url in ig_mirrors:
+        try:
+            async with bot.session.get(url, headers=headers, timeout=5) as resp:
+                if resp.status == 200:
+                    text = await resp.text()
+                    if "<item>" in text: 
+                        xml_data = text
+                        success = True
+                        break
+        except:
+            continue
+
+    if not success:
+        log("인스타그램 1차 우회 미러가 현재 방화벽에 모두 차단되었습니다. 다음 루프를 기약합니다.")
+        return
+        
+    log("🔥 인스타그램(Instagram) 방어벽 돌파 성공!")
+
+    try:
+        root = ET.fromstring(xml_data)
+        namespace = {} # RSSHub 인스타 포맷은 일반적으로 네임스페이스가 없습니다.
+        channel_node = root.find("channel")
+        items = channel_node.findall("item")[:10]
+        items.reverse()
+        
+        channel = await bot.fetch_channel(INSTA_NOTI_CHANNEL_ID)
+        posted_links = await get_recent_posted_links(channel, limit=100)
+
+        for item in items:
+            link = item.findtext("link", "").strip()
+            if not link or link in posted_links: continue
+            
+            title = item.findtext("title", "새로운 인스타그램 게시물").strip()
+            raw_desc = item.findtext("description", "")
+            
+            # ---[★ 인스타그램 본문 고화질 사진 탐색기]---
+            img_url = ""
+            img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc)
+            if img_match:
+                img_url = html.unescape(img_match.group(1))
+            else:
+                # 간혹 <enclosure> 태그로 던져주기도 합니다.
+                enclosure = item.find("enclosure")
+                if enclosure is not None and enclosure.get("url"):
+                    img_url = html.unescape(enclosure.get("url"))
+            
+            # 텍스트 청소 작업 (인스타그램 특유의 지저분한 해시태그 무더기 제거)
+            desc = re.sub(r'<br\s*/?>', '\n', raw_desc)
+            desc = re.sub(r'<[^>]+>', '', desc)
+            desc = html.unescape(desc).strip()
+            
+            # 인스타 특성상 사진과 함께 글이 길기 때문에 150자로 딱 끊어줍니다.
+            if len(desc) > 100:
+                desc = desc[:100] + "..."
+                
+            if not desc:
+                desc = "여기를 클릭하여 인스타그램 본문을 확인하세요."
+            
+            # 시간 적용
+            pub_date_str = item.findtext("pubDate", "")
+            date_text = "Instagram (@leagueoflegendskorea)"
+            if pub_date_str:
+                try:
+                    dt = datetime.datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %Z")
+                    dt = dt.replace(tzinfo=timezone.utc)
+                    dt_korea = dt.astimezone(KST)
+                    date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                except:
+                    pass
+
+            # 인스타그램 고유 그라데이션 대신 찐한 핑블랙(C13584) 배경색 지정
+            embed = discord.Embed(title=title[:250], url=link, description=desc, color=0x0c1014)
+            
+            # =========================================================================
+            # ★[클라우드 이미지 성형외과: 인스타 정사각 사진 조차 16:9 와이드로 꽉 차게 개조!] ★
+            # =========================================================================
+            import urllib.parse
+            if img_url:
+                encoded_img_url = urllib.parse.quote(img_url, safe=':/')
+                # 인스타는 대부분 1:1 사진입니다. 강제로 16:9 캔버스(1920x1080)에 넣고 여백은 다크 테마(2B2D31)로 칠합니다!
+                forced_16_9_url = f"https://wsrv.nl/?url={encoded_img_url}&w=1920&h=1080&fit=contain&cbg=1A1A1C"
+                embed.set_image(url=forced_16_9_url) 
+            else:
+                embed.set_image(url=DEFAULT_WIDE_BANNER)
+            
+            embed.set_footer(text=date_text)
+            
+            try:
+                await channel.send(embed=embed)
+                log(f"인스타그램 포스팅 완료: {link}")
+                posted_links.append(link)
+            except Exception as send_e:
+                log(f"인스타그램 전송 에러: {send_e}")
+
+    except Exception as e:
+        log(f"인스타그램 파싱 중 에러 발생: {e}")
+        traceback.print_exc()
+
 # =================[ 자동 루프 & 이벤트 ] =================
 @tasks.loop(minutes=60)
 async def main_loop():
-    # 3가지 플랫폼 (뉴스, 유튜브, 레딧) 스위치 온!
     await fetch_and_post_news()
     await fetch_and_post_youtube()
     await fetch_and_post_reddit()
+    await fetch_and_post_instagram()
 
 @tasks.loop(time=SCHEDULED_VOTE_TIME)
 async def daily_vote_loop():
