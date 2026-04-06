@@ -314,50 +314,66 @@ async def fetch_and_post_reddit():
         log(f"레딧 파싱 중 에러 발생: {e}")
         traceback.print_exc()
 
-# =================[ 핵심 기능 4: 인스타그램(Instagram) 다중 우회 스크래핑 (16:9 와이드 성형) ] =================
+# =================[ 핵심 기능 4: 인스타그램 스크래핑 (프록시 바운싱 IP 세탁 & 16:9 성형판) ] =================
 async def fetch_and_post_instagram():
-    log("인스타그램 방어벽 우회 시도 중...")
+    log("인스타그램 방어벽 프록시 우회(IP 세탁) 시도 중...")
     
-    # ★ 메타(인스타) 방어벽 우회: 전 세계 개발자들이 몰래 캐싱해두는 RSS 미러 융단폭격
+    # 인스타 캐싱 미러 5곳
     ig_mirrors =[
         "https://rsshub.app/instagram/user/leagueoflegendskorea",
         "https://rsshub.rssforever.com/instagram/user/leagueoflegendskorea",
         "https://rsshub.lihaoc.com/instagram/user/leagueoflegendskorea",
-        "https://rss.itazuraanime.com/instagram/user/leagueoflegendskorea"
+        "https://rss.itazuraanime.com/instagram/user/leagueoflegendskorea",
+        "https://rsshub.huansheng.link/instagram/user/leagueoflegendskorea"
+    ]
+    
+    # ★ 핵심 기술: 깃허브(Azure) IP 차단을 뚫기 위한 퍼블릭 프록시 바운싱 엔진!
+    # 인터넷의 어떤 사이트든 이 주소 뒤에 달아서 보내면 대신 접속해서 원격으로 읽어다 줍니다.
+    proxy_engines =[
+        "https://api.allorigins.win/raw?url=",
+        "https://corsproxy.io/?url="
     ]
     
     headers = {
-        "User-Agent": "Mozilla/5.0 (iPhone; CPU iPhone OS 17_4_1 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
     }
 
-    # 사진이 없거나 로딩 실패 시 띄워줄 리그 오브 레전드 공식 16:9 와이드 배경
-    DEFAULT_WIDE_BANNER = "https://i.ytimg.com/vi/RprbAMOPsH0/maxresdefault.jpg"
+    DEFAULT_WIDE_BANNER = "https://cmsassets.rgpub.io/sanity/images/dsfx7636/news_live/3984f3702ad8dd3ea9127c0bfe5c4d4d6faf6401-3000x2000.jpg"
 
     success = False
     xml_data = ""
+    import urllib.parse
     
-    # 1. RSS 미러 서버들 순차적으로 기습 접속 (타임아웃 5초)
-    for url in ig_mirrors:
-        try:
-            async with bot.session.get(url, headers=headers, timeout=5) as resp:
-                if resp.status == 200:
-                    text = await resp.text()
-                    if "<item>" in text: 
-                        xml_data = text
-                        success = True
-                        break
-        except:
-            continue
+    # 프록시 서버와 인스타 미러 서버를 조합하여 하나라도 걸릴 때까지 융단 폭격을 가합니다!
+    for proxy in proxy_engines:
+        if success: break
+        for mirror in ig_mirrors:
+            # 거울 사이트 주소를 안전하게 코팅해서 프록시 엔진 장전
+            encoded_mirror = urllib.parse.quote(mirror, safe='')
+            target_url = proxy + encoded_mirror
+            
+            try:
+                # 프록시를 경유하므로 시간을 10초 줍니다
+                async with bot.session.get(target_url, headers=headers, timeout=10) as resp:
+                    if resp.status == 200:
+                        text = await resp.text()
+                        if "<rss" in text and "<item>" in text: 
+                            xml_data = text
+                            success = True
+                            log(f"🔗 IP 세탁 및 방어벽 돌파 성공: {mirror}")
+                            break
+            except Exception:
+                continue
 
     if not success:
-        log("인스타그램 1차 우회 미러가 현재 방화벽에 모두 차단되었습니다. 다음 루프를 기약합니다.")
+        log("거울 서버 오프라인 또는 프록시 접근 실패... 다음 시간을 노립니다.")
         return
         
-    log("🔥 인스타그램(Instagram) 방어벽 돌파 성공!")
+    log("🔥 인스타그램(Instagram) 프록시 바운싱 최종 추출 성공!")
 
     try:
         root = ET.fromstring(xml_data)
-        namespace = {} # RSSHub 인스타 포맷은 일반적으로 네임스페이스가 없습니다.
+        namespace = {} 
         channel_node = root.find("channel")
         items = channel_node.findall("item")[:10]
         items.reverse()
@@ -372,30 +388,25 @@ async def fetch_and_post_instagram():
             title = item.findtext("title", "새로운 인스타그램 게시물").strip()
             raw_desc = item.findtext("description", "")
             
-            # ---[★ 인스타그램 본문 고화질 사진 탐색기]---
             img_url = ""
             img_match = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', raw_desc)
             if img_match:
                 img_url = html.unescape(img_match.group(1))
             else:
-                # 간혹 <enclosure> 태그로 던져주기도 합니다.
                 enclosure = item.find("enclosure")
                 if enclosure is not None and enclosure.get("url"):
                     img_url = html.unescape(enclosure.get("url"))
             
-            # 텍스트 청소 작업 (인스타그램 특유의 지저분한 해시태그 무더기 제거)
+            # 본문 청소
             desc = re.sub(r'<br\s*/?>', '\n', raw_desc)
             desc = re.sub(r'<[^>]+>', '', desc)
             desc = html.unescape(desc).strip()
             
-            # 인스타 특성상 사진과 함께 글이 길기 때문에 150자로 딱 끊어줍니다.
-            if len(desc) > 100:
-                desc = desc[:100] + "..."
-                
+            if len(desc) > 150:
+                desc = desc[:150] + "..."
             if not desc:
                 desc = "여기를 클릭하여 인스타그램 본문을 확인하세요."
             
-            # 시간 적용
             pub_date_str = item.findtext("pubDate", "")
             date_text = "Instagram (@leagueoflegendskorea)"
             if pub_date_str:
@@ -403,20 +414,17 @@ async def fetch_and_post_instagram():
                     dt = datetime.datetime.strptime(pub_date_str, "%a, %d %b %Y %H:%M:%S %Z")
                     dt = dt.replace(tzinfo=timezone.utc)
                     dt_korea = dt.astimezone(KST)
-                    date_text = f"{dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
+                    date_text = f"Instagram • {dt_korea.strftime('%Y년 %m월 %d일 %H:%M')}"
                 except:
                     pass
 
-            # 인스타그램 고유 그라데이션 대신 찐한 핑블랙(C13584) 배경색 지정
-            embed = discord.Embed(title=title[:250], url=link, description=desc, color=0x0c1014)
+            embed = discord.Embed(title=title[:250], url=link, description=desc, color=0xC13584)
             
             # =========================================================================
-            # ★[클라우드 이미지 성형외과: 인스타 정사각 사진 조차 16:9 와이드로 꽉 차게 개조!] ★
+            # ★ 16:9 와이드 카드 실시간 성형 로직 유지 ★
             # =========================================================================
-            import urllib.parse
             if img_url:
                 encoded_img_url = urllib.parse.quote(img_url, safe=':/')
-                # 인스타는 대부분 1:1 사진입니다. 강제로 16:9 캔버스(1920x1080)에 넣고 여백은 다크 테마(2B2D31)로 칠합니다!
                 forced_16_9_url = f"https://wsrv.nl/?url={encoded_img_url}&w=1920&h=1080&fit=contain&cbg=1A1A1C"
                 embed.set_image(url=forced_16_9_url) 
             else:
@@ -426,7 +434,7 @@ async def fetch_and_post_instagram():
             
             try:
                 await channel.send(embed=embed)
-                log(f"인스타그램 포스팅 완료: {link}")
+                log(f"인스타그램 포스팅 완료: {link[:40]}...")
                 posted_links.append(link)
             except Exception as send_e:
                 log(f"인스타그램 전송 에러: {send_e}")
