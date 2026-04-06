@@ -275,7 +275,7 @@ async def fetch_and_post_reddit():
                     desc = desc[:100] + "..."
                     
                 if not desc:
-                    desc = "여기를 클릭하여 본문을 확인하세요."
+                    desc = "링크 클릭"
                 
                 pub_node = entry.find('atom:updated', namespace)
                 date_text = "Reddit (Riot Official)"
